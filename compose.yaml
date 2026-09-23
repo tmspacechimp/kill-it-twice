@@ -1,0 +1,9 @@
+services:
+  replicator:
+    image: kill-it-twice/replicator
+    build:
+      context: ./apps/replicator
+  consumer:
+    image: kill-it-twice/consumer
+    build:
+      context: ./apps/consumer
