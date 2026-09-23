@@ -23,37 +23,74 @@ Each prints an identifiable startup line and exits successfully. The replicator 
 
 ## Build and run with Docker Compose
 
-From the repository root, with Docker running:
+Use Docker with Linux containers and the standalone `docker-compose` command. Allow at least 4 GB of memory for Docker. OpenSearch needs `vm.max_map_count` of at least `262144` on the Linux Docker host (or Docker's Linux VM); see the [OpenSearch Docker prerequisites](https://docs.opensearch.org/latest/install-and-configure/install-opensearch/docker/).
+
+From the repository root, copy `.env.example` to `.env` (`cp .env.example .env` in a POSIX shell or `Copy-Item .env.example .env` in PowerShell). Set both passwords to your own local values. No passwords are supplied by the repository. The ignored `.env` also allows host port overrides if a default port is already occupied.
+
+With Docker running:
 
 ```sh
-docker compose up --build
+docker-compose up --build
 ```
 
-Compose builds and starts both application scaffolds. Services are named `replicator` and `consumer` under the Compose project (by default, `kill-it-twice`, from the repository directory name). Compose generates project-prefixed container names to avoid collisions with other projects. Images are tagged `kill-it-twice/replicator` and `kill-it-twice/consumer`. Use `docker compose -p another-project up --build` for a separate container group; image tags remain shared. Their logs include `Replicator started` and `Consumer started`; both containers then exit with code 0. No external services are required or started by this scaffold configuration.
+Compose starts five services: `postgres`, `opensearch`, `rabbitmq`, `replicator`, and `consumer`. The three infrastructure services stay running. The two apps print `Replicator started` and `Consumer started`, then exit with code 0; they do not connect to the infrastructure yet. There is no source schema, seed command, replication, or message consumption at this stage.
+
+In another terminal, check all five containers (including the exited apps) and their logs:
+
+```sh
+docker-compose ps -a
+docker-compose logs replicator consumer
+docker-compose logs postgres opensearch rabbitmq
+```
+
+The infrastructure containers should become healthy. Health checks only indicate service readiness, not data flow or the assignment's failure gates. To start in the background instead, use `docker-compose up --build -d`.
+
+Published ports use host ports from `.env` and bind to all host interfaces. Default addresses for local access are:
+
+| Service | Local interface | Access |
+| --- | --- | --- |
+| PostgreSQL | `127.0.0.1:5432` | Database `client_source`, user `source`, password from `.env` |
+| OpenSearch | <http://localhost:9200> | Plain HTTP without authentication, for local development only |
+| RabbitMQ | `127.0.0.1:5672` | AMQP, user `local`, password from `.env` |
+| RabbitMQ management | <http://localhost:15672> | Same RabbitMQ credentials |
+
+Check the services individually (adjust host ports if overridden):
+
+```sh
+docker-compose exec postgres pg_isready -U source -d client_source
+curl http://localhost:9200/_cluster/health
+docker-compose exec rabbitmq rabbitmq-diagnostics -q check_running
+```
+
+PostgreSQL is the client-like source database. It has no application-owned state tables. Named volumes preserve infrastructure data across container removal. Password environment variables initialize new PostgreSQL/RabbitMQ data only; changing `.env` does not change credentials in an existing volume.
+
+Compose uses project-prefixed container and volume names (by default, `kill-it-twice`, from the directory name). Application images are tagged `replicator` and `consumer`. A separate project name also needs distinct host ports to run concurrently; application image tags remain shared.
 
 To build and run just one application:
 
 ```sh
-docker compose up --build replicator
-docker compose up --build consumer
+docker-compose up --build replicator
+docker-compose up --build consumer
 ```
 
-To remove the containers and Compose network afterward:
+Stop a foreground run with Ctrl+C. To stop and remove the containers and network while keeping data:
 
 ```sh
-docker compose down
+docker-compose down
 ```
+
+To also delete this project's infrastructure data for a fresh local start, use `docker-compose down --volumes`.
 
 ## Build and run with Docker
 
 From the repository root, with Docker running:
 
 ```sh
-docker build -t kill-it-twice/replicator ./apps/replicator
-docker run --rm kill-it-twice/replicator
+docker build -t replicator ./apps/replicator
+docker run --rm replicator
 
-docker build -t kill-it-twice/consumer ./apps/consumer
-docker run --rm kill-it-twice/consumer
+docker build -t consumer ./apps/consumer
+docker run --rm consumer
 ```
 
 Expected output includes `Replicator started` and `Consumer started`, respectively. Each directory is its own build context, with a dependency lockfile. The images compile TypeScript in a build stage and run as the Node user with only runtime files and dependencies.
