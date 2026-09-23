@@ -13,7 +13,7 @@ PostgreSQL (client source) → replicator → OpenSearch (current records)
                                   └─────→ RabbitMQ → consumer → logs
 ```
 
-- Docker Compose runs the source PostgreSQL, replicator, OpenSearch, RabbitMQ, and a separate consumer application.
+- Docker Compose runs the source PostgreSQL, replicator, OpenSearch, RabbitMQ, and a separate consumer application. Infrastructure ports use the short `HOST_PORT:CONTAINER_PORT` format, with host ports supplied by `.env`, and bind to all host interfaces. OpenSearch uses unauthenticated HTTP for this local demonstration.
 - `make seed` adds sample records to the source. PostgreSQL represents a client-owned database: the replicator reads it and does not use it to store internal state. The consumer does not write to it.
 - After startup, the replicator waits for seeded records, reads the initial dataset in bounded batches, indexes records by source ID in OpenSearch, and publishes an event for each record to RabbitMQ. Once that load is done, it does not watch for later changes.
 - The consumer receives events independently and logs them. The event needs enough information to identify the source record and see what was sent.
