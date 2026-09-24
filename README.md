@@ -33,7 +33,7 @@ With Docker running:
 docker-compose up --build
 ```
 
-Compose starts five services: `postgres`, `opensearch`, `rabbitmq`, `replicator`, and `consumer`. The three infrastructure services stay running. The two apps print `Replicator started` and `Consumer started`, then exit with code 0; they do not connect to the infrastructure yet. There is no source schema, seed command, replication, or message consumption at this stage.
+Compose starts five services: `postgres`, `opensearch`, `rabbitmq`, `replicator`, and `consumer`. The three infrastructure services stay running. The two apps print `Replicator started` and `Consumer started`, then exit with code 0; they do not connect to the infrastructure yet. The source schema and sample records are created separately with `make seed` (below). Replication and message consumption are not implemented yet.
 
 In another terminal, check all five containers (including the exited apps) and their logs:
 
@@ -80,6 +80,37 @@ docker-compose down
 ```
 
 To also delete this project's infrastructure data for a fresh local start, use `docker-compose down --volumes`.
+
+## Seed the source
+
+Install GNU Make and ensure `make` and the standalone `docker-compose` command are available in the same environment. On Windows, use GNU Make with a compatible recipe shell (`cmd.exe` or a POSIX shell), or run both commands inside WSL. PowerShell can launch `make`; Make's recipe shell handles the SQL file redirection. A host PostgreSQL installation is unnecessary because the command uses the container's psql client.
+
+After configuring `.env` as above, start PostgreSQL if needed and wait for it to be ready:
+
+```sh
+docker-compose up -d postgres
+docker-compose exec -T postgres pg_isready -U source -d client_source
+make seed
+```
+
+Run these commands from the repository root. Seeding works independently of the replicator and consumer; neither application needs to run. The target itself does not start services or reset volumes. A stopped PostgreSQL service makes it fail.
+
+The script creates `public.customers` in `client_source` with `id integer PRIMARY KEY`, `full_name text NOT NULL`, `email text NOT NULL`, `country_code text NOT NULL`, `status text NOT NULL`, and `created_at timestamptz NOT NULL`. A fresh source receives exactly 10,000 deterministic records with IDs 1 through 10,000:
+
+- Names are `Customer <id>` and emails are `customer<id>@example.test`.
+- Countries cycle through `GE`, `US`, `DE`, `GB`, and `FR`; odd IDs are `active`, even IDs are `inactive`.
+- Timestamps are the fixed UTC base `2025-01-01 00:00:00+00` plus the ID in minutes.
+
+`make seed` prints the resulting count and first five customers ordered by ID. To inspect them separately:
+
+```sh
+docker-compose exec -T postgres psql -X -U source -d client_source -c "SELECT count(*), count(DISTINCT id), min(id), max(id) FROM public.customers;"
+docker-compose exec -T postgres psql -X -U source -d client_source -c "SELECT * FROM public.customers ORDER BY id LIMIT 5;"
+```
+
+For a fresh source, the aggregate values are `10000`, `10000`, `1`, and `10000`. Reruns use `ON CONFLICT (id) DO NOTHING`: only missing IDs in the fixed range are inserted. Existing customer values, including manual edits and records outside the range, are preserved, so a populated table can exceed 10,000 rows.
+
+Schema creation and insertion run in one transaction with psql error-stop enabled; a SQL failure before commit leaves no partially committed seed. The script does not migrate or delete an existing schema; incompatible definitions can produce a visible SQL error. No application-owned state tables are created. These sample records demonstrate v0 loading, not memory/throughput limits, large-scale capacity, or the assignment's failure gates.
 
 ## Build and run with Docker
 
