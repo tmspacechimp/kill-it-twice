@@ -5,7 +5,7 @@ import { setTimeout } from 'node:timers/promises';
 const BATCH_SIZE = 1_000;
 const COLUMNS = 'id, full_name, email, country_code, status, created_at';
 
-type Customer = {
+export type Customer = {
   id: number;
   full_name: string;
   email: string;
@@ -18,7 +18,7 @@ type Customer = {
 export class InitialLoadService {
   private readonly logger = new Logger(InitialLoadService.name);
 
-  async run(): Promise<void> {
+  async run(processRecord: (customer: Customer) => Promise<void> = async () => {}): Promise<void> {
     const client = new Client({
       connectionTimeoutMillis: 5_000,
       options: '-c default_transaction_read_only=on',
@@ -59,6 +59,7 @@ export class InitialLoadService {
         while (batch.length > 0) {
           const firstId = batch[0].id;
           const lastId = batch[batch.length - 1].id;
+          for (const customer of batch) await processRecord(customer);
           total += batch.length;
           batches += 1;
           this.logger.log(

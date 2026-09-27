@@ -48,7 +48,25 @@ Before loading, the reader waits one second between checks while `public.custome
 
 Reads select all six customer columns, ordered by primary key, with a fixed limit of 1,000 rows. The first read has no lower ID bound; subsequent reads use `id > lastId`, including negative, zero, and sparse IDs correctly. Only bounded batches are retained in application memory. Logs show each batch's count, first and last IDs, cumulative count, and final completion. After committing the read-only transaction the connection and Nest context close and the process exits. Empty sources wait indefinitely until seeded. Database sessions default to read-only; the reader creates no source state and issues no data/schema writes.
 
-This ticket implements reading and progress logging only. OpenSearch indexing and RabbitMQ publication remain subsequent work. Holding a snapshot open can delay PostgreSQL cleanup during the load; this is accepted for the initial-load proof of concept.
+Holding a snapshot open can delay PostgreSQL cleanup during the load; this is accepted for the initial-load proof of concept.
+
+## OpenSearch destination (issue #7)
+
+Each source row is indexed sequentially using HTTP PUT to the fixed index `customers`, document ID equal to the decimal source ID. The JSON document contains exactly the six source fields; `created_at` is serialized as an ISO UTC timestamp. OpenSearch creates the index on first write with its default dynamic mapping. `OPENSEARCH_URL` supplies the HTTP endpoint; Compose waits for healthy OpenSearch.
+
+The reader awaits each write before processing the next record or fetching another batch. HTTP requests time out after ten seconds; non-success responses terminate the load with no retry. Successful writes replace documents with the same ID on later full runs; this does not remove stale documents or establish recovery. Normal OpenSearch refresh timing applies to searches; GET by document ID can inspect a write immediately.
+
+## RabbitMQ publication (issue #8)
+
+After each successful index write, the replicator sends one JSON event through RabbitMQ's default exchange to queue `customers.initial-load`. The queue is non-durable, non-exclusive, and not auto-deleted; messages are non-persistent. Both applications declare it identically. The event is `{ "type": "customer.initial-load", "sourceId": <integer>, "record": <the six-field indexed document> }`.
+
+The publisher uses one confirm channel and awaits broker confirmation for each message before advancing. This bounds pending publications and lets the replicator close after its last publication; it does not guarantee consumption or atomicity with OpenSearch. Batch progress is logged only after every row in that batch has been indexed and published. A new process repeats the full snapshot and can publish duplicate events.
+
+Compose supplies `RABBITMQ_HOST`, `RABBITMQ_USER`, and `RABBITMQ_PASSWORD`; `RABBITMQ_PORT` defaults to 5672 inside the applications. Connections time out after five seconds and use a ten-second heartbeat. Client recovery is opt-in and is not enabled. Connection or publication errors fail the process without retries.
+
+## Independent consumer (issue #9)
+
+The plain TypeScript consumer connects only to RabbitMQ, declares the same queue, and logs each full UTF-8 JSON payload prefixed with `Received event `. It uses automatic acknowledgement (`noAck: true`): events can be lost before their logs are written. It keeps no receipts and performs no deduplication, retry, or requeue. It stays subscribed after the replicator exits, closes its connection on SIGINT/SIGTERM, and exits on broker errors or cancellation. Compose waits for healthy RabbitMQ; it has no dependency on the replicator or PostgreSQL.
 
 ## Boundaries and future work
 

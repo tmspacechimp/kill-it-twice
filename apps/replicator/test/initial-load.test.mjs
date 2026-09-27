@@ -110,3 +110,30 @@ test('a failed commit closes the client without logging completion', async (t) =
   assert.equal(h.logs.some((line) => line.startsWith('Initial load complete')), false);
   assert.equal(h.ended(), true);
 });
+
+test('processing is awaited before the next bounded read', async (t) => {
+  const h = harness(t, [rows(1, 1000), rows(1001, 1)]);
+  const processed = [];
+  await new InitialLoadService().run(async (customer) => {
+    const selects = h.queries.filter(({ sql }) => sql.startsWith('SELECT'));
+    assert.equal(selects.length, customer.id <= 1000 ? 1 : 2);
+    await Promise.resolve();
+    processed.push(customer.id);
+  });
+  assert.equal(processed.length, 1001);
+  assert.equal(processed.at(-1), 1001);
+});
+
+test('a destination error stops processing without the next read or completion', async (t) => {
+  const h = harness(t, [rows(1, 1000)]);
+  const failure = new Error('destination failed');
+  const processed = [];
+  await assert.rejects(new InitialLoadService().run(async (customer) => {
+    processed.push(customer.id);
+    if (customer.id === 2) throw failure;
+  }), failure);
+  assert.deepEqual(processed, [1, 2]);
+  assert.equal(h.queries.length, 2);
+  assert.equal(h.logs.some((line) => line.startsWith('Initial load complete')), false);
+  assert.equal(h.ended(), true);
+});

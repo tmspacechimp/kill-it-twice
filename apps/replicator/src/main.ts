@@ -2,17 +2,29 @@ import 'reflect-metadata';
 import { Logger, Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { InitialLoadService } from './initial-load.service.js';
+import { IndexerService } from './indexer.service.js';
+import { PublisherService } from './publisher.service.js';
 
-@Module({ providers: [InitialLoadService] })
+@Module({ providers: [InitialLoadService, IndexerService, PublisherService] })
 class AppModule {}
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.createApplicationContext(AppModule);
+  const publisher = app.get(PublisherService);
+  const indexer = app.get(IndexerService);
   try {
+    await publisher.open();
     new Logger('Replicator').log('Replicator started');
-    await app.get(InitialLoadService).run();
+    await app.get(InitialLoadService).run(async (customer) => {
+      await indexer.index(customer);
+      await publisher.publish(customer);
+    });
   } finally {
-    await app.close();
+    try {
+      await publisher.close();
+    } finally {
+      await app.close();
+    }
   }
 }
 
