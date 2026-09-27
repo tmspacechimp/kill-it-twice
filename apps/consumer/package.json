@@ -13,5 +13,8 @@
     "@types/node": "24.13.6",
     "typescript": "5.9.3"
   },
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "amqplib": "2.0.1"
+  }
 }

@@ -57,10 +57,34 @@ services:
     image: replicator
     build:
       context: ./apps/replicator
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: local
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
+      OPENSEARCH_URL: http://opensearch:9200
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: client_source
+      PGUSER: source
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
   consumer:
     image: consumer
     build:
       context: ./apps/consumer
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: local
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
 
 volumes:
   postgres-data:
