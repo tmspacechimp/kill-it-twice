@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { Customer } from './initial-load.service.js';
+import type { Customer } from './customer.js';
 
 @Injectable()
 export class IndexerService {
@@ -14,7 +14,14 @@ export class IndexerService {
     });
     const body = await response.text();
     if (!response.ok) {
-      throw new Error('OpenSearch indexing failed for customer ' + customer.id + ': HTTP ' + response.status + ' ' + body);
+      throw new Error(
+        'OpenSearch indexing failed for customer ' +
+          customer.id +
+          ': HTTP ' +
+          response.status +
+          ' ' +
+          body,
+      );
     }
   }
 }

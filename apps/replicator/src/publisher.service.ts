@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { connect, type ChannelModel, type ConfirmChannel } from 'amqplib';
-import type { Customer } from './initial-load.service.js';
+import type { Customer } from './customer.js';
 
 const QUEUE = 'customers.initial-load';
 
@@ -13,13 +13,16 @@ export class PublisherService {
   async open(): Promise<void> {
     const password = process.env.RABBITMQ_PASSWORD;
     if (!password) throw new Error('RABBITMQ_PASSWORD is required');
-    this.connection = await connect({
-      hostname: process.env.RABBITMQ_HOST ?? 'localhost',
-      port: Number(process.env.RABBITMQ_PORT ?? 5672),
-      username: process.env.RABBITMQ_USER ?? 'local',
-      password,
-      heartbeat: 10,
-    }, { timeout: 5_000 });
+    this.connection = await connect(
+      {
+        hostname: process.env.RABBITMQ_HOST ?? 'localhost',
+        port: Number(process.env.RABBITMQ_PORT ?? 5672),
+        username: process.env.RABBITMQ_USER ?? 'local',
+        password,
+        heartbeat: 10,
+      },
+      { timeout: 5_000 },
+    );
     const fail = (error: unknown) => {
       console.error('Publisher connection failed', error);
       process.exit(1);

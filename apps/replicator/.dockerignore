@@ -4,3 +4,9 @@
 !tsconfig.json
 !src/
 !src/**
+
+!eslint.config.mjs
+!.prettierrc.json
+!.prettierignore
+!test/
+!test/**

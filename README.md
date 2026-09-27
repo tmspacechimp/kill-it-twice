@@ -10,6 +10,8 @@ A local initial-load proof of concept: PostgreSQL → NestJS replicator → Open
 - [Faithful English translation](docs/optio-assignment-faithful-en.md).
 - [Project brief](docs/project-brief-en.md): broader requirements, not a claim of implemented behavior.
 
+- [v0 walkthrough and catch-up](docs/v0-catch-up.md): verified results and a guided tour.
+
 ## Current behavior
 
 The replicator waits for seeded customers and reads one repeatable-read, read-only PostgreSQL snapshot in batches of at most 1,000. The first query has no lower ID bound; subsequent queries use `id > lastId`, ordered by ID. Missing or empty data is checked once per second; other source errors fail the process.
@@ -24,7 +26,7 @@ The independent plain TypeScript consumer connects only to RabbitMQ and logs eac
 
 ## Prerequisites
 
-Use Docker with Linux containers, Compose, and GNU Make. The existing Makefile invokes the standalone `docker-compose` command, so that command must be available to Make. The Compose plugin can run the same configuration with `docker compose`. The actual environment used below had standalone Compose 1.29.2 but no Compose plugin.
+Use Docker with Linux containers, Compose, and GNU Make. The existing Makefile invokes the standalone `docker-compose` command, so that command must be available to Make. The Compose plugin can run the same configuration with `docker compose`. The successful run below used standalone Compose 1.29.2.
 
 Allow at least 4 GB of Docker memory. OpenSearch needs `vm.max_map_count >= 262144` on the Docker Linux host/VM; see the [OpenSearch Docker prerequisites](https://docs.opensearch.org/latest/install-and-configure/install-opensearch/docker/).
 
@@ -43,10 +45,10 @@ Passwords initialize new PostgreSQL/RabbitMQ volumes only; editing `.env` does n
 From the repository root:
 
 ```sh
-docker compose up --build
+docker-compose up --build
 ```
 
-With standalone Compose, use `docker-compose up --build`. Add `-d` to run in the background. In another terminal, after infrastructure is healthy:
+With the Compose plugin, the equivalent startup command is `docker compose up --build`; the seed target still requires standalone `docker-compose`. Add `-d` to run in the background. In another terminal, after infrastructure is healthy:
 
 ```sh
 make seed
@@ -62,7 +64,7 @@ Batch 10: rows=1000 firstId=9001 lastId=10000 total=10000
 Initial load complete: rows=10000 batches=10
 ```
 
-These are expected final-pipeline results; the observed validation record below distinguishes what actually ran.
+The fresh-volume run below produced these completion logs and exited with code 0.
 
 Inspect the same source ID across the three systems:
 
@@ -101,7 +103,7 @@ The only table is `public.customers`: `id integer PRIMARY KEY`, plus non-null `f
 
 Schema creation and insertion share a transaction with psql stopping on errors. `ON CONFLICT (id) DO NOTHING` preserves existing values and inserts only missing sample IDs. Existing extra records are preserved. The seed does not migrate an incompatible schema, and neither application writes internal state to PostgreSQL.
 
-On this Windows host, GNU Make is available inside WSL, not PowerShell. The exact seed invocation used was:
+On this Windows host, GNU Make is available inside WSL, not PowerShell. For the default project, a PowerShell invocation is:
 
 ```powershell
 wsl --cd /mnt/c/work/kill-it-twice --exec make seed
@@ -118,6 +120,8 @@ npm ci --prefix apps/consumer
 npm run build --prefix apps/consumer
 ```
 
+See the [test reading guide](apps/replicator/test/README.md) for the 12 scenarios and commands for running individual test files.
+
 The replicator tests compile TypeScript and use mocked clients to inspect bounded reads, waiting, cleanup, destination errors, JSON fields, and publication confirmation. They are not automated pipeline or failure-gate checks.
 
 For local execution, set the five standard PostgreSQL variables (`PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`), `OPENSEARCH_URL`, and `RABBITMQ_HOST`, `RABBITMQ_PORT`, `RABBITMQ_USER`, `RABBITMQ_PASSWORD`. Use published host ports. The consumer needs only the RabbitMQ variables. Neither application loads `.env` itself.
@@ -127,50 +131,81 @@ npm start --prefix apps/replicator
 npm start --prefix apps/consumer
 ```
 
+The replicator build runs format:check, lint, and typecheck before compiling; any failed check stops the build. This also applies to its Docker build. The consumer keeps its TypeScript-only build.
+
 Both Dockerfiles compile TypeScript and ship runtime dependencies as the Node user.
 
 ## Actual validation — 2026-09-27
 
-The existing issue #6 implementation was retained, committed, and fast-forward merged into local main before adding destinations. Its live reader-only demonstration succeeded:
+The complete integrated v0 path was run from fresh volumes using Docker Engine 29.1.3 and standalone Compose 1.29.2 in WSL. Project `v0-verified` used separate host ports; the existing project's data was preserved.
 
-```text
-docker-compose up --build -d postgres replicator
-wsl --cd /mnt/c/work/kill-it-twice --exec make seed
-docker-compose logs --no-color replicator
+Run the following in a WSL shell from the repository root. These are the commands used for the successful run:
+
+```sh
+export COMPOSE_PROJECT_NAME=v0-verified
+export POSTGRES_PORT=25432 OPENSEARCH_PORT=29200
+export RABBITMQ_PORT=25673 RABBITMQ_MANAGEMENT_PORT=25674
+docker-compose up --build -d
+make seed
+timeout 240 docker wait v0-verified_replicator_1
+docker-compose logs --no-color --tail=12 replicator
 docker-compose ps -a
 ```
 
-Observed: seed inserted 10,000 rows; the reader logged waiting for seed, ten 1,000-row batches (IDs 1–1000 through 9001–10000), and `Initial load complete: rows=10000 batches=10`. The reader exited 0. This observation predates destination integration.
+The project now exists. Choose a new project name and unused ports for another fresh-volume run; update the container name in `docker wait` accordingly. Do not delete existing volumes just to repeat the demonstration.
 
-For the final implementation:
+Observed results:
 
-| Command | Actual result |
+| Check | Actual result |
 | --- | --- |
-| `npm test --prefix apps/replicator` | TypeScript compiled; 12 tests passed, 0 failed. |
-| `npm run build --prefix apps/consumer` | TypeScript compiled successfully. |
-| `docker compose up --build -d` | Failed: Compose plugin unavailable (`unknown flag: --build`; `docker compose version` also reported unknown command). |
-| `docker-compose up --build -d` | Initially failed with Docker socket connection resets. A later attempt built both application images and started infrastructure and consumer, but hit Compose 1.29.2's `KeyError: 'ContainerConfig'` recreating the exited reader. |
-| `docker-compose rm -f replicator` followed by `docker-compose up --build -d` | Removed only the exited replicator container, preserved volumes, and started the integrated application successfully. |
-| `wsl --cd /mnt/c/work/kill-it-twice --exec make seed` | On the reused source: `INSERT 0 0`, total 10,000; printed the first five source rows. |
-| `docker-compose logs --no-color --tail=6 replicator consumer` | Replicator started; consumer logged complete events for source IDs 2–7. |
+| Image builds | Both applications compiled and their Docker images built successfully. |
+| Seed | `INSERT 0 10000`; total 10,000 customers. |
+| Replicator | Ten 1,000-row batches, IDs 1–1000 through 9001–10000; `Initial load complete: rows=10000 batches=10`; exit 0. |
+| OpenSearch | `customers/_count` returned 10,000, with no failed shards. |
+| Consumer | 10,000 `Received event` log lines; remained running after the replicator exited. |
+| Sample comparison | IDs 1, 1000, 1001, and 10000 matched across source rows, document bodies, and event records, including timestamps. |
+| Queue | `customers.initial-load`: 0 ready, 0 unacknowledged, 1 consumer. |
+| Source tables | Only `public.customers` was present in the public schema. |
+| Focused tests | `npm test --prefix apps/replicator`: 12 passed, 0 failed. |
+| Consumer build | `npm run build --prefix apps/consumer`: passed. |
 
-One observed source row from the seed output:
+The integrated load logged startup at 11:59:53 UTC and completion at 12:01:44 UTC. This is an observation of this local run, not a capacity benchmark.
 
-```text
-2 | Customer 2 | customer2@example.test | US | inactive | 2025-01-01 00:02:00+00
+With the same exported environment, the manual inspection commands were:
+
+```sh
+docker-compose exec -T postgres psql -X -U source -d client_source -c "SELECT * FROM public.customers WHERE id IN (1,1000,1001,10000) ORDER BY id;"
+docker-compose exec -T postgres psql -X -U source -d client_source -c "SELECT count(*), count(DISTINCT id), min(id), max(id) FROM public.customers;"
+docker-compose exec -T postgres psql -X -U source -d client_source -c '\dt public.*'
+docker-compose exec -T opensearch curl --fail --silent http://localhost:9200/customers/_doc/1
+docker-compose exec -T opensearch curl --fail --silent http://localhost:9200/customers/_doc/1000
+docker-compose exec -T opensearch curl --fail --silent http://localhost:9200/customers/_doc/1001
+docker-compose exec -T opensearch curl --fail --silent http://localhost:9200/customers/_doc/10000
+docker-compose exec -T opensearch curl --fail --silent http://localhost:9200/customers/_count
+docker-compose logs --no-color consumer | grep -E '"sourceId":(1|1000|1001|10000),'
+docker-compose logs --no-color consumer | grep -c 'Received event '
+docker-compose exec -T rabbitmq rabbitmqctl list_queues name messages_ready messages_unacknowledged consumers
 ```
 
-The corresponding observed consumer log:
+Source row 10000 was:
 
 ```text
-Received event {"type":"customer.initial-load","sourceId":2,"record":{"id":2,"full_name":"Customer 2","email":"customer2@example.test","country_code":"US","status":"inactive","created_at":"2025-01-01T00:02:00.000Z"}}
+10000 | Customer 10000 | customer10000@example.test | FR | inactive | 2025-01-07 22:40:00+00
 ```
 
-Subsequent source/document/log inspection commands from the walkthrough failed while Compose fetched the Docker server API version: `ConnectionResetError(104, 'Connection reset by peer')` and `ConnectionRefusedError(111, 'Connection refused')`. No OpenSearch document response or final integrated completion was captured.
+Its OpenSearch response included `"_id":"10000"`, `"found":true`, and this `_source`:
 
-The host's Docker commands are WSL wrappers. Diagnostics reported a failed systemd Docker service (an existing PID prevented startup) and intermittently `Cannot connect to the Docker daemon at unix:///var/run/docker.sock`. The root cause of the repeated daemon unavailability was not established or changed.
+```json
+{"id":10000,"full_name":"Customer 10000","email":"customer10000@example.test","country_code":"FR","status":"inactive","created_at":"2025-01-07T22:40:00.000Z"}
+```
 
-A final isolated walkthrough attempt used `wsl --cd /mnt/c/work/kill-it-twice --exec sh -lc` with `COMPOSE_PROJECT_NAME=kill-it-twice-v0-walkthrough` and ports 25432/29200/25673/25674. Its initial `docker version` failed to connect, so it stopped before creating resources or seeding. A complete clean-start run, matching OpenSearch GET, and final integrated completion remain **unverified due to Docker availability**. Restore Docker access and repeat the walkthrough above.
+The corresponding consumer output was:
+
+```text
+Received event {"type":"customer.initial-load","sourceId":10000,"record":{"id":10000,"full_name":"Customer 10000","email":"customer10000@example.test","country_code":"FR","status":"inactive","created_at":"2025-01-07T22:40:00.000Z"}}
+```
+
+No application change was needed after code review and this run. This evidence verifies the v0 happy path and sampled field equality; it does not establish the assignment's failure scenarios.
 
 ## Limitations
 

@@ -2,8 +2,9 @@ FROM node:24-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
-COPY tsconfig.json ./
+COPY tsconfig.json eslint.config.mjs .prettierrc.json .prettierignore ./
 COPY src ./src
+COPY test ./test
 RUN npm run build
 RUN npm prune --omit=dev
 
