@@ -14,12 +14,12 @@ The original handout governs the assignment requirements. The project brief is a
 
 ## Current state
 
-Two independent application scaffolds are available:
+Two independent applications are available:
 
-- `apps/replicator`: NestJS/TypeScript application context.
+- `apps/replicator`: NestJS/TypeScript initial PostgreSQL reader.
 - `apps/consumer`: plain TypeScript application.
 
-Each prints an identifiable startup line and exits successfully. The replicator closes its Nest application context before exiting. Neither application requires external services yet.
+The replicator waits for seeded customers, reads one read-only snapshot in batches of at most 1,000, logs progress, then closes its database connection and Nest context and exits. The consumer remains a scaffold that prints its startup line and exits. OpenSearch indexing and RabbitMQ publication/consumption are not implemented yet.
 
 ## Build and run with Docker Compose
 
@@ -33,7 +33,7 @@ With Docker running:
 docker-compose up --build
 ```
 
-Compose starts five services: `postgres`, `opensearch`, `rabbitmq`, `replicator`, and `consumer`. The three infrastructure services stay running. The two apps print `Replicator started` and `Consumer started`, then exit with code 0; they do not connect to the infrastructure yet. The source schema and sample records are created separately with `make seed` (below). Replication and message consumption are not implemented yet.
+Compose starts five services: `postgres`, `opensearch`, `rabbitmq`, `replicator`, and `consumer`. The three infrastructure services stay running. The replicator waits for healthy PostgreSQL, prints `Replicator started`, and waits if the source table is missing or empty. Run `make seed` in another terminal (below). It reads the initial snapshot and exits with code 0 after logging completion. The consumer prints `Consumer started` and exits with code 0. Destination indexing, publication, and message consumption are not implemented yet.
 
 In another terminal, check all five containers (including the exited apps) and their logs:
 
@@ -118,17 +118,17 @@ From the repository root, with Docker running:
 
 ```sh
 docker build -t replicator ./apps/replicator
-docker run --rm replicator
+docker run --rm --env PGHOST --env PGPORT --env PGDATABASE --env PGUSER --env PGPASSWORD replicator
 
 docker build -t consumer ./apps/consumer
 docker run --rm consumer
 ```
 
-Expected output includes `Replicator started` and `Consumer started`, respectively. Each directory is its own build context, with a dependency lockfile. The images compile TypeScript in a build stage and run as the Node user with only runtime files and dependencies.
+For a standalone replicator container, first export the five PG connection variables with a host reachable from inside that container. Expected output includes `Replicator started` and `Consumer started`, respectively; the replicator requires PostgreSQL and seed data to complete. Each directory is its own build context, with a dependency lockfile. The images compile TypeScript in a build stage and run as the Node user with only runtime files and dependencies.
 
 ## Build and run locally
 
-Use Node.js 24 and npm. From the repository root:
+Use Node.js 24 and npm. Before running the replicator locally, set `PGHOST=127.0.0.1`, `PGPORT` to your published PostgreSQL port, `PGDATABASE=client_source`, `PGUSER=source`, and `PGPASSWORD` to your local source password. The local process does not load `.env` automatically. From the repository root:
 
 ```sh
 npm ci --prefix apps/replicator
@@ -140,4 +140,17 @@ npm run build --prefix apps/consumer
 npm start --prefix apps/consumer
 ```
 
-These commands check scaffold startup only. The initial-load implementation and the assignment's failure scenarios remain future work.
+To inspect issue #6 with the Compose stack running, start the reader before seeding:
+
+```sh
+docker-compose up --build -d postgres replicator
+make seed
+docker-compose logs replicator
+docker-compose ps -a
+```
+
+A fresh source logs `Waiting for seeded records in public.customers` before seeding, followed by ten batches of 1,000 rows: first IDs 1, 1001, ..., 9001 and last IDs 1000, 2000, ..., 10000. The final line is `Initial load complete: rows=10000 batches=10`, and the replicator exits with code 0. If already seeded, it starts reading immediately. Each new process performs a fresh load; it has no checkpoint. To rerun an exited reader, use `docker-compose start replicator`.
+
+The first nonempty read defines a repeatable-read snapshot. Rows changed afterward are outside that load. The reader performs no writes to PostgreSQL and stops after that snapshot, with no polling of later changes. Missing/empty seed data is checked once per second; other database errors terminate with a nonzero exit status. These observations check the initial read only, not destination delivery or the assignment's failure gates.
+
+Run the reader's focused tests with `npm test --prefix apps/replicator`. They compile TypeScript and use a mocked PostgreSQL client to check batching, missing/empty-table waiting, sparse IDs, and error cleanup. They do not establish that a live PostgreSQL/Compose load succeeds; use the manual steps above for that check.

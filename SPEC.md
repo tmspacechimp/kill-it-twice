@@ -40,6 +40,16 @@ Schema creation and insertion share an explicit transaction, with psql stopping 
 
 Seeding requires only PostgreSQL, independently of the replicator and consumer. It neither starts services nor resets volumes and creates no application-owned state tables. This dataset demonstrates v0 sample loading, not large-scale capacity or the assignment's failure gates.
 
+## Initial source reader (issue #6)
+
+The reader connects using the standard `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, and `PGPASSWORD` environment variables. Compose supplies these and waits for healthy PostgreSQL. A connection attempt times out after five seconds; connection, permission, and schema errors fail the process rather than being retried.
+
+Before loading, the reader waits one second between checks while `public.customers` is missing or empty. Each check opens a repeatable-read, read-only transaction. An empty check rolls back before sleeping, so newly committed seed data can become visible. The first nonempty check defines the initial snapshot; the reader keeps that transaction until all its rows have been read. Later inserts, updates, and deletes are outside this load. This snapshot is a v0 read boundary, not a concurrent-update or recovery guarantee.
+
+Reads select all six customer columns, ordered by primary key, with a fixed limit of 1,000 rows. The first read has no lower ID bound; subsequent reads use `id > lastId`, including negative, zero, and sparse IDs correctly. Only bounded batches are retained in application memory. Logs show each batch's count, first and last IDs, cumulative count, and final completion. After committing the read-only transaction the connection and Nest context close and the process exits. Empty sources wait indefinitely until seeded. Database sessions default to read-only; the reader creates no source state and issues no data/schema writes.
+
+This ticket implements reading and progress logging only. OpenSearch indexing and RabbitMQ publication remain subsequent work. Holding a snapshot open can delay PostgreSQL cleanup during the load; this is accepted for the initial-load proof of concept.
+
 ## Boundaries and future work
 
 This v0 makes no claim about recovery, complete delivery, duplicates, concurrent updates, or behavior when a destination fails. It has no incremental sync, checkpoints, retry policy, DLQ, observability UI, or `make verify`. Do not describe the visible happy path as proof of any failure gate.
