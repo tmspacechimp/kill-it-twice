@@ -1,11 +1,14 @@
 import 'reflect-metadata';
 import { Logger, Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { CustomerSourceService } from './customer-source.service.js';
 import { InitialLoadService } from './initial-load.service.js';
 import { IndexerService } from './indexer.service.js';
 import { PublisherService } from './publisher.service.js';
 
-@Module({ providers: [InitialLoadService, IndexerService, PublisherService] })
+@Module({
+  providers: [CustomerSourceService, InitialLoadService, IndexerService, PublisherService],
+})
 class AppModule {}
 
 async function bootstrap(): Promise<void> {

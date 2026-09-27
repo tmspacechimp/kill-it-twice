@@ -1,86 +1,78 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Client } from 'pg';
 import { setTimeout } from 'node:timers/promises';
+import { BATCH_SIZE, CustomerSourceService } from './customer-source.service.js';
+import type { Customer } from './customer.js';
 
-const BATCH_SIZE = 1_000;
-const COLUMNS = 'id, full_name, email, country_code, status, created_at';
-
-export type Customer = {
-  id: number;
-  full_name: string;
-  email: string;
-  country_code: string;
-  status: string;
-  created_at: Date;
-};
+const SEED_POLL_INTERVAL_MS = 1_000;
+type ProcessRecord = (customer: Customer) => Promise<void>;
+type LoadSummary = { rows: number; batches: number };
 
 @Injectable()
 export class InitialLoadService {
   private readonly logger = new Logger(InitialLoadService.name);
 
-  async run(processRecord: (customer: Customer) => Promise<void> = async () => {}): Promise<void> {
-    const client = new Client({
-      connectionTimeoutMillis: 5_000,
-      options: '-c default_transaction_read_only=on',
-    });
+  constructor(private readonly source: CustomerSourceService) {}
 
+  async run(processRecord: ProcessRecord = async () => {}): Promise<void> {
     try {
-      await client.connect();
-      let waitingLogged = false;
-      // Empty attempts end their snapshot so a later seed can become visible.
-      for (;;) {
-        await client.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
-        let batch: Customer[];
-        try {
-          const result = await client.query<Customer>(
-            `SELECT ${COLUMNS} FROM public.customers ORDER BY id LIMIT $1`,
-            [BATCH_SIZE],
-          );
-          batch = result.rows;
-        } catch (error: unknown) {
-          if ((error as { code?: string } | null)?.code !== '42P01') {
-            throw error;
-          }
-          batch = [];
-        }
-
-        if (batch.length === 0) {
-          await client.query('ROLLBACK');
-          if (!waitingLogged) {
-            this.logger.log('Waiting for seeded records in public.customers');
-            waitingLogged = true;
-          }
-          await setTimeout(1_000);
-          continue;
-        }
-
-        let total = 0;
-        let batches = 0;
-        while (batch.length > 0) {
-          const firstId = batch[0].id;
-          const lastId = batch[batch.length - 1].id;
-          for (const customer of batch) await processRecord(customer);
-          total += batch.length;
-          batches += 1;
-          this.logger.log(
-            `Batch ${batches}: rows=${batch.length} firstId=${firstId} lastId=${lastId} total=${total}`,
-          );
-          if (batch.length < BATCH_SIZE) break;
-          // Release the current rows before fetching the next bounded batch.
-          batch = [];
-          const result = await client.query<Customer>(
-            `SELECT ${COLUMNS} FROM public.customers WHERE id > $1 ORDER BY id LIMIT $2`,
-            [lastId, BATCH_SIZE],
-          );
-          batch = result.rows;
-        }
-        await client.query('COMMIT');
-        this.logger.log(`Initial load complete: rows=${total} batches=${batches}`);
-        return;
-      }
+      await this.source.connect();
+      const summary = await this.loadSnapshot(processRecord);
+      await this.source.commitSnapshot();
+      this.logger.log(`Initial load complete: rows=${summary.rows} batches=${summary.batches}`);
     } finally {
-      // Disconnecting also rolls back any transaction left by a failed read.
-      await client.end();
+      await this.source.close();
     }
+  }
+
+  private async loadSnapshot(processRecord: ProcessRecord): Promise<LoadSummary> {
+    let batch = await this.waitForSeededBatch();
+    const summary: LoadSummary = { rows: 0, batches: 0 };
+
+    while (batch.length > 0) {
+      await this.processBatch(batch, processRecord);
+      this.recordProgress(batch, summary);
+      if (batch.length < BATCH_SIZE) break;
+
+      const lastId = batch[batch.length - 1].id;
+      // eslint-disable-next-line no-useless-assignment -- Release processed rows before awaiting the next batch.
+      batch = [];
+      batch = await this.source.readNextBatch(lastId);
+    }
+
+    return summary;
+  }
+
+  private async waitForSeededBatch(): Promise<Customer[]> {
+    let waitingLogged = false;
+
+    for (;;) {
+      await this.source.beginSnapshot();
+      const batch = await this.source.readFirstBatch();
+      if (batch.length > 0) return batch;
+
+      // End empty snapshots so the next check can see committed seed data.
+      await this.source.rollbackSnapshot();
+      if (!waitingLogged) {
+        this.logger.log('Waiting for seeded records in public.customers');
+        waitingLogged = true;
+      }
+      await setTimeout(SEED_POLL_INTERVAL_MS);
+    }
+  }
+
+  private async processBatch(batch: Customer[], processRecord: ProcessRecord): Promise<void> {
+    for (const customer of batch) {
+      await processRecord(customer);
+    }
+  }
+
+  private recordProgress(batch: Customer[], summary: LoadSummary): void {
+    summary.rows += batch.length;
+    summary.batches += 1;
+    const firstId = batch[0].id;
+    const lastId = batch[batch.length - 1].id;
+    this.logger.log(
+      `Batch ${summary.batches}: rows=${batch.length} firstId=${firstId} lastId=${lastId} total=${summary.rows}`,
+    );
   }
 }

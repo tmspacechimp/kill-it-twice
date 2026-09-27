@@ -5,62 +5,113 @@ import { IndexerService } from '../dist/indexer.service.js';
 import { PublisherService } from '../dist/publisher.service.js';
 
 const customer = {
-  id: 1, full_name: 'Customer 1', email: 'customer1@example.test',
-  country_code: 'GE', status: 'active', created_at: new Date('2025-01-01T00:01:00Z'),
+  id: 1,
+  full_name: 'Customer 1',
+  email: 'customer1@example.test',
+  country_code: 'GE',
+  status: 'active',
+  created_at: new Date('2025-01-01T00:01:00Z'),
 };
 
-function endpoint(t) {
-  const original = process.env.OPENSEARCH_URL;
-  process.env.OPENSEARCH_URL = 'http://opensearch:9200';
-  t.after(() => {
-    if (original === undefined) delete process.env.OPENSEARCH_URL;
-    else process.env.OPENSEARCH_URL = original;
-  });
-}
+const expectedDocument = {
+  id: 1,
+  full_name: 'Customer 1',
+  email: 'customer1@example.test',
+  country_code: 'GE',
+  status: 'active',
+  created_at: '2025-01-01T00:01:00.000Z',
+};
 
-test('indexing uses the source ID and complete JSON fields', async (t) => {
-  endpoint(t);
+test('OpenSearch receives a PUT using the source ID and all customer fields', async (t) => {
+  // Given an OpenSearch endpoint that accepts the document.
+  useOpenSearchEndpoint(t);
+  const requests = [];
   t.mock.method(globalThis, 'fetch', async (url, options) => {
-    assert.equal(url.href, 'http://opensearch:9200/customers/_doc/1');
-    assert.equal(options.method, 'PUT');
-    assert.deepEqual(JSON.parse(options.body), {
-      ...customer, created_at: '2025-01-01T00:01:00.000Z',
-    });
+    requests.push({ url: url.href, ...options });
     return new Response('{"result":"created"}', { status: 201 });
   });
+
+  // When a customer is indexed.
   await new IndexerService().index(customer);
+
+  // Then exactly one PUT contains the expected document.
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, 'http://opensearch:9200/customers/_doc/1');
+  assert.equal(requests[0].method, 'PUT');
+  assert.deepEqual(JSON.parse(requests[0].body), expectedDocument);
 });
 
-test('a rejected index write fails without retry', async (t) => {
-  endpoint(t);
-  const fetchMock = t.mock.method(globalThis, 'fetch', async () =>
-    new Response('mapping rejected', { status: 400 }));
-  await assert.rejects(new IndexerService().index(customer), /customer 1: HTTP 400 mapping rejected/);
-  assert.equal(fetchMock.mock.callCount(), 1);
+test('an OpenSearch rejection reaches the caller without retrying', async (t) => {
+  // Given OpenSearch rejects the document.
+  useOpenSearchEndpoint(t);
+  const request = t.mock.method(globalThis, 'fetch', async () => {
+    return new Response('mapping rejected', { status: 400 });
+  });
+
+  // When indexing is attempted.
+  const indexing = new IndexerService().index(customer);
+
+  // Then the error identifies the record and response, and only one request was made.
+  await assert.rejects(indexing, /customer 1: HTTP 400 mapping rejected/);
+  assert.equal(request.mock.callCount(), 1);
 });
 
-test('publication contains the indexed record and waits for broker confirmation', async () => {
+test('RabbitMQ receives the full event and publication waits for confirmation', async (t) => {
+  // Given a channel whose broker confirmation has not arrived yet.
+  const brokerConfirmation = Promise.withResolvers();
+  const waitingForConfirmation = Promise.withResolvers();
+  const messages = [];
   const publisher = new PublisherService();
-  let confirm;
-  const confirmation = new Promise((resolve) => { confirm = resolve; });
+  t.after(() => brokerConfirmation.resolve());
+
+  // Substitute the channel directly so this test needs no RabbitMQ connection.
   publisher.channel = {
     sendToQueue(queue, body, options) {
-      assert.equal(queue, 'customers.initial-load');
-      assert.deepEqual(JSON.parse(body.toString()), {
-        type: 'customer.initial-load', sourceId: 1,
-        record: { ...customer, created_at: '2025-01-01T00:01:00.000Z' },
-      });
-      assert.equal(options.persistent, false);
-      assert.equal(options.contentType, 'application/json');
+      messages.push({ queue, event: JSON.parse(body.toString()), options });
       return true;
     },
-    waitForConfirms() { return confirmation; },
+    waitForConfirms() {
+      waitingForConfirmation.resolve();
+      return brokerConfirmation.promise;
+    },
   };
-  let completed = false;
-  const pending = publisher.publish(customer).then(() => { completed = true; });
-  await Promise.resolve();
-  assert.equal(completed, false);
-  confirm();
-  await pending;
-  assert.equal(completed, true);
+
+  // When the customer is published, pause before the broker confirms.
+  let publicationFinished = false;
+  const publishing = publisher.publish(customer).then(() => {
+    publicationFinished = true;
+  });
+  await waitingForConfirmation.promise;
+
+  // Then the event is correct, but publication is still waiting.
+  assert.deepEqual(messages, [
+    {
+      queue: 'customers.initial-load',
+      event: {
+        type: 'customer.initial-load',
+        sourceId: 1,
+        record: expectedDocument,
+      },
+      options: { contentType: 'application/json', persistent: false },
+    },
+  ]);
+  assert.equal(publicationFinished, false);
+
+  // Once the broker confirms, publication can finish.
+  brokerConfirmation.resolve();
+  await publishing;
+  assert.equal(publicationFinished, true);
 });
+
+function useOpenSearchEndpoint(testContext) {
+  const previousUrl = process.env.OPENSEARCH_URL;
+  process.env.OPENSEARCH_URL = 'http://opensearch:9200';
+
+  testContext.after(() => {
+    if (previousUrl === undefined) {
+      delete process.env.OPENSEARCH_URL;
+    } else {
+      process.env.OPENSEARCH_URL = previousUrl;
+    }
+  });
+}
