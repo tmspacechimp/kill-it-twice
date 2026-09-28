@@ -1,17 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { setTimeout } from 'node:timers/promises';
-import { BATCH_SIZE, CustomerSourceService } from './customer-source.service.js';
-import type { Customer } from './customer.js';
+import { BATCH_SIZE, ShipmentSourceService } from './shipment-source.service.js';
+import type { ShipmentEvent } from './shipment-event.js';
 
 const SEED_POLL_INTERVAL_MS = 1_000;
-type ProcessRecord = (customer: Customer) => Promise<void>;
+type ProcessRecord = (event: ShipmentEvent) => Promise<void>;
 type LoadSummary = { rows: number; batches: number };
 
 @Injectable()
 export class InitialLoadService {
   private readonly logger = new Logger(InitialLoadService.name);
 
-  constructor(private readonly source: CustomerSourceService) {}
+  constructor(private readonly source: ShipmentSourceService) {}
 
   async run(processRecord: ProcessRecord = async () => {}): Promise<void> {
     try {
@@ -42,7 +42,7 @@ export class InitialLoadService {
     return summary;
   }
 
-  private async waitForSeededBatch(): Promise<Customer[]> {
+  private async waitForSeededBatch(): Promise<ShipmentEvent[]> {
     let waitingLogged = false;
 
     for (;;) {
@@ -53,20 +53,20 @@ export class InitialLoadService {
       // End empty snapshots so the next check can see committed seed data.
       await this.source.rollbackSnapshot();
       if (!waitingLogged) {
-        this.logger.log('Waiting for seeded records in public.customers');
+        this.logger.log('Waiting for seeded records in public.shipment_status_events');
         waitingLogged = true;
       }
       await setTimeout(SEED_POLL_INTERVAL_MS);
     }
   }
 
-  private async processBatch(batch: Customer[], processRecord: ProcessRecord): Promise<void> {
-    for (const customer of batch) {
-      await processRecord(customer);
+  private async processBatch(batch: ShipmentEvent[], processRecord: ProcessRecord): Promise<void> {
+    for (const event of batch) {
+      await processRecord(event);
     }
   }
 
-  private recordProgress(batch: Customer[], summary: LoadSummary): void {
+  private recordProgress(batch: ShipmentEvent[], summary: LoadSummary): void {
     summary.rows += batch.length;
     summary.batches += 1;
     const firstId = batch[0].id;

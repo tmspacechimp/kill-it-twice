@@ -1,13 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { Client } from 'pg';
-import type { Customer } from './customer.js';
+import type { ShipmentEvent } from './shipment-event.js';
 
 export const BATCH_SIZE = 1_000;
-const COLUMNS = 'id, full_name, email, country_code, status, created_at';
+const COLUMNS = 'id, shipment_id, version, status, occurred_at';
 const MISSING_TABLE_ERROR_CODE = '42P01';
 
 @Injectable()
-export class CustomerSourceService {
+export class ShipmentSourceService {
   private client!: Client;
 
   async connect(): Promise<void> {
@@ -35,10 +35,10 @@ export class CustomerSourceService {
     await this.client.query('ROLLBACK');
   }
 
-  async readFirstBatch(): Promise<Customer[]> {
+  async readFirstBatch(): Promise<ShipmentEvent[]> {
     try {
-      const result = await this.client.query<Customer>(
-        `SELECT ${COLUMNS} FROM public.customers ORDER BY id LIMIT $1`,
+      const result = await this.client.query<ShipmentEvent>(
+        `SELECT ${COLUMNS} FROM public.shipment_status_events ORDER BY id LIMIT $1`,
         [BATCH_SIZE],
       );
       return result.rows;
@@ -49,9 +49,9 @@ export class CustomerSourceService {
     }
   }
 
-  async readNextBatch(lastId: number): Promise<Customer[]> {
-    const result = await this.client.query<Customer>(
-      `SELECT ${COLUMNS} FROM public.customers WHERE id > $1 ORDER BY id LIMIT $2`,
+  async readNextBatch(lastId: number): Promise<ShipmentEvent[]> {
+    const result = await this.client.query<ShipmentEvent>(
+      `SELECT ${COLUMNS} FROM public.shipment_status_events WHERE id > $1 ORDER BY id LIMIT $2`,
       [lastId, BATCH_SIZE],
     );
     return result.rows;

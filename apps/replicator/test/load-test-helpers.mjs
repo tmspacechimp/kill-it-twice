@@ -1,10 +1,10 @@
 import { Logger } from '@nestjs/common';
 import { Client } from 'pg';
-import { CustomerSourceService } from '../dist/customer-source.service.js';
+import { ShipmentSourceService } from '../dist/shipment-source.service.js';
 import { InitialLoadService } from '../dist/initial-load.service.js';
 
-// Only IDs matter to the reader. Destination tests use a complete customer.
-export function customersFrom(firstId, count) {
+// Only IDs matter to the reader. Destination tests use a complete event.
+export function eventsFrom(firstId, count) {
   return Array.from({ length: count }, (_, offset) => ({ id: firstId + offset }));
 }
 
@@ -21,7 +21,7 @@ export function setupLoad(testContext, options) {
   testContext.mock.method(Logger.prototype, 'log', (message) => logs.push(message));
 
   return {
-    loader: new InitialLoadService(new CustomerSourceService()),
+    loader: new InitialLoadService(new ShipmentSourceService()),
     database,
     logs,
   };
