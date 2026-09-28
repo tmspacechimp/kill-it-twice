@@ -89,7 +89,9 @@ A clean-source walkthrough needs unused volumes. Use a new `COMPOSE_PROJECT_NAME
 
 ## Source seed
 
-`make seed` runs `seed.sql` through psql in the running PostgreSQL service, user `source`, database `client_source`. It can run independently of both applications. It does not start services or reset volumes.
+`make seed` builds and runs the independent TypeScript source-writer CLI against the running PostgreSQL service, user `source`, database `client_source`. Its Compose service is behind the `seed` profile, so normal startup does not seed automatically. The disposable writer runs with `--no-deps` and does not start PostgreSQL, the replicator, or the consumer, or reset volumes.
+
+Use `make seed SEED_ARGS="--shipments 3"` for a smaller initial fixture (eight events). Counts must be positive integers whose generated IDs fit PostgreSQL integer columns. Runs always start at shipment/event ID 1; smaller counts retain existing data, and larger counts add missing initial histories. There are no commands for later transitions or timed generation.
 
 The seed creates only `public.shipment_status_events`:
 
@@ -103,14 +105,14 @@ The seed creates only `public.shipment_status_events`:
 
 `UNIQUE (shipment_id, version)` prevents duplicate shipment versions. Writers append events rather than updating or deleting history; this convention is not enforced by mutation triggers or a transition state machine. Event IDs identify events, while versions order each shipment's history. IDs do not guarantee commit order or safe incremental discovery.
 
-A fresh source receives 10,000 deterministic events for 4,000 shipments. Odd shipment IDs have versions 1–3: created → in_transit → delivered. Even IDs have versions 1–2: created → cancelled. Status totals are 4,000 created and 2,000 each of in_transit, delivered, and cancelled. Event IDs 1–10,000 are assigned by row numbering over shipment ID and version, cast to integer. Timestamps are `2025-01-01 00:00:00+00` plus event ID in minutes. The seed prints event and shipment counts and the first ten events, including several complete histories.
+A fresh source receives 10,000 deterministic events for 4,000 shipments. Odd shipment IDs have versions 1–3: created → in_transit → delivered. Even IDs have versions 1–2: created → cancelled. Status totals are 4,000 created and 2,000 each of in_transit, delivered, and cancelled. The pure, lazy generator assigns sequential event IDs in shipment ID and version order. Timestamps are `2025-01-01 00:00:00+00` plus event ID in minutes. The seed prints event and shipment counts and the first ten events, including several complete histories.
 
-Schema creation and insertion share a transaction with psql stopping on errors. Targeted `ON CONFLICT (id) DO NOTHING` preserves existing values and inserts only missing sample IDs. Extra events and any existing customer table remain untouched. A distinct ID claiming an existing shipment/version fails and rolls back the seed; unrelated schema or constraint errors also abort. The seed does not migrate an incompatible schema, and neither application writes internal state to PostgreSQL.
+Schema creation and insertion share a transaction; the writer awaits parameterized inserts of at most 1,000 events and rolls back on errors without retrying. Targeted `ON CONFLICT (id) DO NOTHING` preserves existing values and inserts only missing sample IDs. Extra events and any existing customer table remain untouched. A distinct ID claiming an existing shipment/version fails and rolls back the seed; unrelated schema or constraint errors also abort. The seed does not migrate an incompatible schema, and neither application writes internal state to PostgreSQL.
 
 For a fresh PostgreSQL-only check, run from a WSL shell at the repository root with `.env` configured. Choose an unused project name and PostgreSQL host port, preserving existing volumes:
 
 ```sh
-export COMPOSE_PROJECT_NAME=issue17-seed-check
+export COMPOSE_PROJECT_NAME=issue19-seed-check
 export POSTGRES_PORT=25433
 docker-compose up -d postgres
 docker-compose exec -T postgres pg_isready -U source -d client_source
@@ -118,7 +120,7 @@ docker-compose exec -T postgres pg_isready -U source -d client_source
 make seed
 ```
 
-Only PostgreSQL is started. A fresh run should report `INSERT 0 10000`, 10,000 events, and 4,000 shipments; an unchanged rerun should report `INSERT 0 0`. The shipment reader consumes this fixture on its next initial load.
+Only PostgreSQL is started. A fresh run should report `Seed complete: inserted=10000`, 10,000 events, and 4,000 shipments; an unchanged rerun should report `Seed complete: inserted=0`. The shipment reader consumes this fixture on its next initial load.
 
 On this Windows host, GNU Make is available inside WSL, not PowerShell. For the default project, a PowerShell invocation is:
 
@@ -135,7 +137,11 @@ npm ci --prefix apps/replicator
 npm test --prefix apps/replicator
 npm ci --prefix apps/consumer
 npm run build --prefix apps/consumer
+npm ci --prefix apps/source-writer
+npm test --prefix apps/source-writer
 ```
+
+The source-writer tests check deterministic histories without PostgreSQL and use a fake query client to check bounded inserts and transaction handling. They do not check replication or failure gates. For local seeding, set the standard PostgreSQL environment variables and run `npm start --prefix apps/source-writer -- --shipments 4000`; use `--help` for usage. The CLI does not load `.env` itself.
 
 See the [test reading guide](../apps/replicator/test/README.md) for the 14 scenarios and commands for running individual test files.
 
@@ -150,7 +156,7 @@ npm start --prefix apps/consumer
 
 The replicator build runs format:check, lint, and typecheck before compiling; any failed check stops the build. This also applies to its Docker build. The consumer keeps its TypeScript-only build.
 
-Both Dockerfiles compile TypeScript and ship runtime dependencies as the Node user.
+All application Dockerfiles compile TypeScript and ship runtime dependencies as the Node user.
 
 ## Limitations
 

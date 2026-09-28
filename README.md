@@ -22,7 +22,7 @@ make seed
 docker-compose logs --follow replicator consumer
 ```
 
-A fresh seed creates 10,000 events for 4,000 shipments. The replicator processes them in batches of 1,000 and exits; the consumer stays running. Rerunning `make seed` preserves existing data.
+`make seed` builds and runs a separate source-writer CLI against running PostgreSQL. A fresh seed creates 10,000 events for 4,000 shipments. Use `make seed SEED_ARGS="--shipments 3"` for a smaller initial fixture. The replicator processes them in batches of 1,000 and exits; the consumer stays running. Rerunning `make seed` preserves existing data.
 
 ## Inspect
 

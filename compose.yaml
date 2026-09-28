@@ -1,4 +1,14 @@
 services:
+  source-writer:
+    profiles: ["seed"]
+    build:
+      context: ./apps/source-writer
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: client_source
+      PGUSER: source
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
   postgres:
     image: postgres:17
     environment:

@@ -23,7 +23,7 @@ NestJS/TypeScript is the intended replicator stack. Keep the consumer small; its
 
 ## Sample source data
 
-`make seed` runs `seed.sql` through psql in the running Compose `postgres` service, as user `source` in database `client_source`. It creates only `public.shipment_status_events`, with this schema:
+`make seed` builds and runs the independent TypeScript source-writer CLI (issue #19) against the running Compose `postgres` service, as user `source` in database `client_source`. The service is behind the `seed` profile and is not part of normal startup. It creates only `public.shipment_status_events`, with this schema:
 
 | Column | Type | Constraint |
 | --- | --- | --- |
@@ -37,11 +37,13 @@ NestJS/TypeScript is the intended replicator stack. Keep the consumer small; its
 
 Retaining history does not solve incremental discovery. Concurrent transactions can commit out of event-ID order; IDs are not commit-order offsets, and an ID cursor alone does not guarantee that no events are missed. Incremental discovery and its ordering guarantees require a future specification decision.
 
-A fresh source receives exactly 10,000 events for shipments 1 through 4,000. Odd shipment IDs have versions 1–3 (`created`, `in_transit`, `delivered`); even shipment IDs have versions 1–2 (`created`, `cancelled`). Totals are 4,000 created, 2,000 in_transit, 2,000 delivered, and 2,000 cancelled events. PostgreSQL `generate_series` generates histories; `row_number() OVER (ORDER BY shipment_id, version)::integer` assigns event IDs 1–10,000. Every `occurred_at` is `TIMESTAMPTZ '2025-01-01 00:00:00+00' + id * INTERVAL '1 minute'`. Generation uses neither randomness nor the current clock.
+A fresh source receives exactly 10,000 events for shipments 1 through 4,000. Odd shipment IDs have versions 1–3 (`created`, `in_transit`, `delivered`); even shipment IDs have versions 1–2 (`created`, `cancelled`). Totals are 4,000 created, 2,000 in_transit, 2,000 delivered, and 2,000 cancelled events. A pure, lazy TypeScript generator yields histories ordered by shipment ID and version, assigning sequential event IDs starting at 1. Every `occurred_at` is `TIMESTAMPTZ '2025-01-01 00:00:00+00' + id * INTERVAL '1 minute'`. Generation uses neither randomness nor the current clock.
 
-Schema creation (`CREATE TABLE IF NOT EXISTS`) and insertion share an explicit transaction, with psql stopping on SQL errors. Targeted `ON CONFLICT (id) DO NOTHING` makes reruns insert only missing IDs in the fixed range. Existing values and extra events are preserved; a populated table can exceed 10,000 rows. A different event ID conflicting with a shipment/version pair fails the transaction, as do unrelated schema or constraint errors. The script does not migrate an existing schema or drop, truncate, rename, or alter an existing customer table. After committing, it prints total events, distinct shipments, and the first ten events ordered by ID.
+Schema creation (`CREATE TABLE IF NOT EXISTS`) and insertion share an explicit transaction. The writer awaits parameterized inserts of at most 1,000 events each and rolls back on errors, without retries. Targeted `ON CONFLICT (id) DO NOTHING` makes reruns insert only missing IDs in the fixed range. Existing values and extra events are preserved; a populated table can exceed 10,000 rows. A different event ID conflicting with a shipment/version pair fails the transaction, as do unrelated schema or constraint errors. The CLI does not migrate an existing schema or drop, truncate, rename, or alter an existing customer table. After committing, it prints total events, distinct shipments, and the first ten events ordered by ID.
 
-Seeding requires only PostgreSQL, independently of the replicator and consumer. It neither starts services nor resets volumes and creates no application-owned state tables. This dataset demonstrates v0 sample loading, not large-scale capacity or the assignment's failure gates.
+The CLI accepts `--shipments N` (or `make seed SEED_ARGS="--shipments N"`), a positive integer up to 858,993,458 so event IDs fit the source integer column. The default is 4,000. Every run generates the same prefix starting at shipment/event ID 1; a smaller count does not remove existing rows, and a larger count adds missing initial histories. This is initial seeding only, not a command for later transitions. Generation uses no database access.
+
+Seeding requires only running PostgreSQL, independently of the replicator and consumer. `make seed` builds and runs a disposable writer container with `--no-deps`; it starts no other services, resets no volumes, and creates no application-owned state tables. The CLI uses standard PostgreSQL environment variables, a five-second connection timeout, and closes its connection on success or failure. Invalid arguments fail before connection. Unit tests establish fixture histories independently of PostgreSQL; they do not establish pipeline outcomes. This dataset demonstrates v0 sample loading, not large-scale capacity or the assignment's failure gates.
 
 ## Initial source reader (issue #6)
 
