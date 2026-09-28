@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { connect, type ChannelModel, type ConfirmChannel } from 'amqplib';
-import type { Customer } from './customer.js';
+import type { ShipmentEvent } from './shipment-event.js';
 
-const QUEUE = 'customers.initial-load';
+const QUEUE = 'shipments.initial-load';
 
 @Injectable()
 export class PublisherService {
@@ -36,10 +36,10 @@ export class PublisherService {
     await this.channel.assertQueue(QUEUE, { durable: false, autoDelete: false });
   }
 
-  async publish(customer: Customer): Promise<void> {
+  async publish(event: ShipmentEvent): Promise<void> {
     if (!this.channel) throw new Error('Publisher is not connected');
-    const event = { type: 'customer.initial-load', sourceId: customer.id, record: customer };
-    this.channel.sendToQueue(QUEUE, Buffer.from(JSON.stringify(event)), {
+    const message = { type: 'shipment.status', sourceId: event.id, record: event };
+    this.channel.sendToQueue(QUEUE, Buffer.from(JSON.stringify(message)), {
       contentType: 'application/json',
       persistent: false,
     });

@@ -1,16 +1,16 @@
 import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { customersFrom, postgresError, setupLoad } from './load-test-helpers.mjs';
+import { eventsFrom, postgresError, setupLoad } from './load-test-helpers.mjs';
 
 const FIRST_BATCH_SQL =
-  'SELECT id, full_name, email, country_code, status, created_at FROM public.customers ORDER BY id LIMIT $1';
+  'SELECT id, shipment_id, version, status, occurred_at FROM public.shipment_status_events ORDER BY id LIMIT $1';
 const NEXT_BATCH_SQL =
-  'SELECT id, full_name, email, country_code, status, created_at FROM public.customers WHERE id > $1 ORDER BY id LIMIT $2';
+  'SELECT id, shipment_id, version, status, occurred_at FROM public.shipment_status_events WHERE id > $1 ORDER BY id LIMIT $2';
 
-test('10,000 customers are read in batches of 1,000, then the connection closes', async (t) => {
+test('10,000 events are read in batches of 1,000, then the connection closes', async (t) => {
   // Given ten full batches, followed by an empty result.
-  const batches = Array.from({ length: 10 }, (_, batch) => customersFrom(batch * 1000 + 1, 1000));
+  const batches = Array.from({ length: 10 }, (_, batch) => eventsFrom(batch * 1000 + 1, 1000));
   const { loader, database, logs } = setupLoad(t, { readResults: [...batches, []] });
 
   // When the initial load runs.
@@ -37,8 +37,8 @@ test('10,000 customers are read in batches of 1,000, then the connection closes'
 });
 
 test('a missing or empty table gets a fresh snapshot until seed data appears', async (t) => {
-  // Given a missing table, then an empty table, then one seeded customer.
-  const missingTable = postgresError('customers does not exist', '42P01');
+  // Given a missing table, then an empty table, then one seeded event.
+  const missingTable = postgresError('events does not exist', '42P01');
   const { loader, database, logs } = setupLoad(t, {
     readResults: [missingTable, [], [{ id: 1 }]],
   });
@@ -64,20 +64,20 @@ test('a missing or empty table gets a fresh snapshot until seed data appears', a
 });
 
 test('negative, zero, and widely spaced IDs are processed, including a short last batch', async (t) => {
-  // Given a full batch ending at 999 and one remaining customer with a much larger ID.
-  const firstBatch = [{ id: -2147483648 }, { id: 0 }, ...customersFrom(2, 998)];
+  // Given a full batch ending at 999 and one remaining event with a much larger ID.
+  const firstBatch = [{ id: -2147483648 }, { id: 0 }, ...eventsFrom(2, 998)];
   const { loader, database, logs } = setupLoad(t, {
     readResults: [firstBatch, [{ id: 2147483647 }]],
   });
   const processedIds = [];
 
   // When both batches are processed.
-  await loader.run(async (customer) => {
-    processedIds.push(customer.id);
+  await loader.run(async (event) => {
+    processedIds.push(event.id);
   });
 
   // Then no IDs are skipped and a short batch needs no extra read.
-  const expectedIds = firstBatch.map((customer) => customer.id).concat(2147483647);
+  const expectedIds = firstBatch.map((event) => event.id).concat(2147483647);
   assert.deepEqual(processedIds, expectedIds);
   assert.deepEqual(database.reads, [
     { sql: FIRST_BATCH_SQL, parameters: [1000] },
@@ -89,7 +89,7 @@ test('negative, zero, and widely spaced IDs are processed, including a short las
 
 test('a schema error stops immediately instead of waiting for seed data', async (t) => {
   // Given a table whose required column is missing.
-  const schemaError = postgresError('email column does not exist', '42703');
+  const schemaError = postgresError('shipment_id column does not exist', '42703');
   const { loader, database, logs } = setupLoad(t, { readResults: [schemaError] });
 
   // When the first read fails, the error reaches the caller.
@@ -121,7 +121,7 @@ test('a second-batch read error does not commit or report a completed load', asy
   // Given the first batch succeeds but the next read fails.
   const readError = postgresError('permission denied', '42501');
   const { loader, database, logs } = setupLoad(t, {
-    readResults: [customersFrom(1, 1000), readError],
+    readResults: [eventsFrom(1, 1000), readError],
   });
 
   // When the second read fails.
@@ -135,7 +135,7 @@ test('a second-batch read error does not commit or report a completed load', asy
 });
 
 test('a failed commit does not report completion, but still closes the client', async (t) => {
-  // Given one customer was read, but committing the snapshot fails.
+  // Given one event was read, but committing the snapshot fails.
   const commitError = new Error('connection lost during commit');
   const { loader, database, logs } = setupLoad(t, {
     readResults: [[{ id: 1 }]],
@@ -151,23 +151,23 @@ test('a failed commit does not report completion, but still closes the client', 
   assert.equal(database.closeCalls, 1);
 });
 
-test('the next batch is not read while a customer is still being processed', async (t) => {
-  // Given processing of the first customer is paused.
+test('the next batch is not read while an event is still being processed', async (t) => {
+  // Given processing of the first event is paused.
   const { loader, database } = setupLoad(t, {
-    readResults: [customersFrom(1, 1000), [{ id: 1001 }]],
+    readResults: [eventsFrom(1, 1000), [{ id: 1001 }]],
   });
   const processingStarted = Promise.withResolvers();
   const allowProcessingToFinish = Promise.withResolvers();
   const processedIds = [];
   t.after(() => allowProcessingToFinish.resolve());
 
-  // When the load reaches that customer, hold it there.
-  const loading = loader.run(async (customer) => {
-    if (customer.id === 1) {
+  // When the load reaches that event, hold it there.
+  const loading = loader.run(async (event) => {
+    if (event.id === 1) {
       processingStarted.resolve();
       await allowProcessingToFinish.promise;
     }
-    processedIds.push(customer.id);
+    processedIds.push(event.id);
   });
   await processingStarted.promise;
 
@@ -181,26 +181,26 @@ test('the next batch is not read while a customer is still being processed', asy
   assert.equal(database.reads.length, 2);
   assert.deepEqual(
     processedIds,
-    customersFrom(1, 1001).map((customer) => customer.id),
+    eventsFrom(1, 1001).map((event) => event.id),
   );
 });
 
-test('a destination error stops before processing more customers or reading another batch', async (t) => {
-  // Given a full batch whose second customer fails at the destination.
+test('a destination error stops before processing more events or reading another batch', async (t) => {
+  // Given a full batch whose second event fails at the destination.
   const { loader, database, logs } = setupLoad(t, {
-    readResults: [customersFrom(1, 1000)],
+    readResults: [eventsFrom(1, 1000)],
   });
   const destinationError = new Error('destination failed');
   const attemptedIds = [];
 
-  // When processing customer 2 fails.
-  const loading = loader.run(async (customer) => {
-    attemptedIds.push(customer.id);
-    if (customer.id === 2) throw destinationError;
+  // When processing event 2 fails.
+  const loading = loader.run(async (event) => {
+    attemptedIds.push(event.id);
+    if (event.id === 2) throw destinationError;
   });
   await assert.rejects(loading, destinationError);
 
-  // Then customer 3 and the next batch are never attempted.
+  // Then event 3 and the next batch are never attempted.
   assert.deepEqual(attemptedIds, [1, 2]);
   assert.equal(database.reads.length, 1);
   assert.equal(database.commands.includes('COMMIT'), false);

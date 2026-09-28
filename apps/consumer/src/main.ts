@@ -1,6 +1,6 @@
 import { connect } from 'amqplib';
 
-const QUEUE = 'customers.initial-load';
+const QUEUE = 'shipments.initial-load';
 
 async function main(): Promise<void> {
   const password = process.env.RABBITMQ_PASSWORD;
