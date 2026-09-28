@@ -87,6 +87,26 @@ After successful completion, expect the replicator to be exited with code 0 and 
 
 A clean-source walkthrough needs unused volumes. Use a new `COMPOSE_PROJECT_NAME` and unused host ports, consistently for Compose and `make seed`, to preserve existing data. Application image tags remain shared.
 
+## Browser inspection with Dashboards
+
+Normal Compose startup includes OpenSearch Dashboards 3.4.0, matching OpenSearch. Issue #22 moves OpenSearch from 3.3.2 to 3.4.0 because a matching Dashboards 3.3.2 image is unavailable. Starting this configuration against an existing project upgrades its OpenSearch container; use a separate project and unused ports for a fresh-data check that preserves the old volumes. To start Dashboards and its OpenSearch dependency:
+
+```sh
+docker-compose config --quiet
+docker-compose up -d dashboards
+docker-compose logs --tail=30 dashboards
+```
+
+Open [OpenSearch Dashboards](http://localhost:5601). Set `DASHBOARDS_PORT` in `.env` to override the host port; existing configurations without it use 5601. Dashboards connects to the internal OpenSearch HTTP address, independently of `OPENSEARCH_PORT`. Both security plugins are disabled for this local demo, so no login is required. Startup can take a minute after OpenSearch is healthy.
+
+1. Complete the initial load above. Dismiss the enhanced Discover announcement if offered, then choose **Explore on my own** on the welcome screen.
+2. Open **Management > Dashboards Management** from the main navigation (or **Manage** on Home). In **Management menu**, choose **Index patterns**, then **Create index pattern**. Enter `shipments` and continue to the next step. If it does not match an index, check the replicator logs: OpenSearch creates `shipments` on its first indexed event.
+3. Choose **I don't want to use the time filter**, then create the pattern. The seed timestamps are in January 2025, so a default recent-time filter would hide them. If you choose `occurred_at` instead, set an absolute time range covering your source events.
+4. Open **Discover**, select the `shipments` pattern, and search `shipment_id: 1`. Expand the document and inspect `shipment_id`, `version`, `status`, `id`, and `occurred_at`. With a fresh default seed, expect shipment 1, version 3, status `delivered`, event ID 3. Shipment 2 should have version 2 and status `cancelled`.
+5. Use **Refresh** after indexing changes. Search visibility follows OpenSearch's refresh timing. Existing data may contain higher versions than the sample; compare with `shipments/_doc/1` using the inspection command above.
+
+Dashboards shows the current projection, not the complete source event history. Its saved index pattern lives in OpenSearch. It is an inspection tool, not the assignment's operator UI for pipeline controls, lag, DLQ, or failure simulation.
+
 ## Source seed
 
 `make seed` builds and runs the independent TypeScript source-writer CLI against the running PostgreSQL service, user `source`, database `client_source`. Its Compose service is behind the `seed` profile, so normal startup does not seed automatically. The disposable writer runs with `--no-deps` and does not start PostgreSQL, the replicator, or the consumer, or reset volumes.
@@ -164,4 +184,4 @@ This is a sequential initial-load POC, not a throughput benchmark. The long-live
 
 Indexing and publication are separate operations. The queue and events are non-durable/non-persistent; the consumer uses automatic acknowledgement, so an event may be lost before logging. Broker confirmation is not evidence of consumer logging or atomic delivery to both destinations.
 
-There is no incremental sync, checkpoint, retry/reconnect policy, DLQ, receipt storage, UI, recovery mechanism, or failure-gate claim. Empty-source readiness polling and infrastructure health checks are not delivery guarantees. No `make verify` or automated outcome gate is provided.
+There is no incremental sync, checkpoint, retry/reconnect policy, DLQ, receipt storage, operator UI, recovery mechanism, or failure-gate claim. Empty-source readiness polling and infrastructure health checks are not delivery guarantees. No `make verify` or automated outcome gate is provided.

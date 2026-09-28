@@ -2,7 +2,7 @@
 
 A local shipment replication demo: a NestJS/TypeScript replicator reads PostgreSQL events, stores each shipment's latest status in OpenSearch, and publishes every event to RabbitMQ. A separate consumer logs the events.
 
-The current version performs one initial load. Incremental sync, recovery, and a UI are not implemented.
+The current version performs one initial load. OpenSearch Dashboards provides shipment inspection; incremental sync, recovery, and the assignment's operator UI are not implemented.
 
 ## Run
 
@@ -34,6 +34,8 @@ docker-compose ps -a
 ```
 
 After the sample load, shipment 1 has version 3 and status `delivered`. OpenSearch contains 4,000 shipment documents.
+
+For browser inspection, open [OpenSearch Dashboards](http://localhost:5601) (or the host port set by `DASHBOARDS_PORT`). No login is required. In **Management > Dashboards Management > Index patterns**, create a pattern named `shipments` and choose **I don't want to use the time filter**. Open **Discover**, select `shipments`, and search `shipment_id: 1`. Expand the result to see `version: 3` and `status: delivered` after a fresh sample load. Omitting the time filter keeps the fixture's January 2025 timestamps visible. See the [detailed walkthrough](docs/development.md#browser-inspection-with-dashboards) for startup and troubleshooting.
 
 Run the initial load again (this republishes all events):
 

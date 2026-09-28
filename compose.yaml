@@ -26,7 +26,7 @@ services:
       retries: ${DEFAULT_HEALTHCHECK_RETRIES}
       start_period: ${DEFAULT_HEALTHCHECK_START_PERIOD}
   opensearch:
-    image: opensearchproject/opensearch:3.3.2
+    image: opensearchproject/opensearch:3.4.0
     environment:
       discovery.type: single-node
       DISABLE_INSTALL_DEMO_CONFIG: "true"
@@ -46,6 +46,16 @@ services:
       timeout: ${DEFAULT_HEALTHCHECK_TIMEOUT}
       retries: ${DEFAULT_HEALTHCHECK_RETRIES}
       start_period: ${DEFAULT_HEALTHCHECK_START_PERIOD}
+  dashboards:
+    image: opensearchproject/opensearch-dashboards:3.4.0
+    environment:
+      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
+    ports:
+      - "${DASHBOARDS_PORT:-5601}:5601"
+    depends_on:
+      opensearch:
+        condition: service_healthy
   rabbitmq:
     hostname: rabbitmq
     image: rabbitmq:4.1-management

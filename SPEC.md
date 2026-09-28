@@ -73,6 +73,12 @@ Compose supplies `RABBITMQ_HOST`, `RABBITMQ_USER`, and `RABBITMQ_PASSWORD`; `RAB
 
 The plain TypeScript consumer connects only to RabbitMQ, declares the same queue, and logs each full UTF-8 JSON payload prefixed with `Received event `. It uses automatic acknowledgement (`noAck: true`): events can be lost before their logs are written. It keeps no receipts and performs no deduplication, retry, or requeue. It stays subscribed after the replicator exits, closes its connection on SIGINT/SIGTERM, and exits on broker errors or cancellation. Compose waits for healthy RabbitMQ; it has no dependency on the replicator or PostgreSQL.
 
+## Shipment inspection (issue #22)
+
+OpenSearch and OpenSearch Dashboards are pinned together at 3.4.0. The previous OpenSearch pin was 3.3.2, but no Dashboards 3.3.2 image is published; issue #22 moves both forward to an available matching pair. Dashboards connects to `http://opensearch:9200` after OpenSearch is healthy, with its security plugin disabled to match the local unauthenticated setup. `DASHBOARDS_PORT` controls the host port and defaults to 5601, including for existing `.env` files without the new setting.
+
+Users create a `shipments` index pattern without a time filter and inspect the latest indexed shipment status in Discover. Dashboards stores its own configuration in OpenSearch, never in the source database. This adds an inspection tool only: it does not provide pipeline controls, lag reporting, DLQ handling, failure simulation, or evidence for the assignment's failure gates.
+
 ## Boundaries and future work
 
 This v0 makes no claim about recovery, complete delivery, duplicates, concurrent updates, or behavior when a destination fails. It has no incremental sync, checkpoints, retry policy, DLQ, observability UI, or `make verify`. Do not describe the visible happy path as proof of any failure gate.

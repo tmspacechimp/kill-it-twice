@@ -1,5 +1,36 @@
 # Validation history
 
+## Dashboards inspection (issue #22) - 2026-09-28
+
+The first startup attempt with Dashboards 3.3.2 failed with `manifest unknown`. Registry checks confirmed matching OpenSearch and Dashboards 3.4.0 images; Compose now pins both to that version. Validation used fresh project `issue22-dashboards-check`, preserving existing projects and volumes. From a WSL shell at the repository root:
+
+```sh
+export COMPOSE_PROJECT_NAME=issue22-dashboards-check
+export POSTGRES_PORT=35432 OPENSEARCH_PORT=39200
+export RABBITMQ_PORT=35672 RABBITMQ_MANAGEMENT_PORT=35674
+export DASHBOARDS_PORT=5601
+docker-compose config --quiet
+docker-compose up -d postgres opensearch rabbitmq consumer dashboards
+docker-compose build source-writer
+docker-compose up -d postgres
+docker-compose run --rm --no-deps -T source-writer --shipments 3
+docker-compose up -d --no-build --no-recreate replicator consumer
+```
+
+Compose configuration validation passed, including an alternate `DASHBOARDS_PORT=15601`; the default resolved to host port 5601. Source-writer build passed and seeding inserted eight events for three shipments. Concurrent issue #21 work rebuilt the shared replicator image before container creation; the actual running image was `sha256:ea0d82f4ebb957e3676744ce576bdef12773d2df7f24f08a14d329a57fbcbaa7`. Logs showed `Initial load complete: rows=8 batches=1`, followed by incremental polling. No incremental events were appended for this check.
+
+```sh
+docker-compose logs --tail=10 replicator
+docker-compose exec -T opensearch curl --fail --silent http://localhost:9200/shipments/_doc/1
+docker-compose exec -T opensearch curl --fail --silent http://localhost:9200/shipments/_count
+```
+
+OpenSearch returned three shipment documents. Shipment 1 had event ID 3, version 3, status `delivered`, and timestamp `2025-01-01T00:03:00.000Z`.
+
+The browser opened [Dashboards](http://localhost:5601) without a login. Through Dashboards Management, a `shipments` index pattern was created with **I don't want to use the time filter**. In Discover, the query `shipment_id: 1` returned **Result (1/1)**. Expanding the result showed `id: 3`, `shipment_id: 1`, `version: 3`, and `status: delivered`, matching OpenSearch. The timestamp displayed as January 1, 2025 at 04:03 in the browser's UTC+4 timezone. The UI and isolated project were left running for inspection. Existing-volume upgrades were not tested.
+
+This is an inspection-tool check, not evidence for the assignment's failure gates or its full operator UI.
+
 Issue #17 replaced the customer fixture and pipeline with append-only shipment status events. The current reader uses shipment events, OpenSearch keeps the highest version per shipment, and RabbitMQ carries individual events. Existing customer tables, index, and queue were left untouched.
 
 The dated records below preserve the observed results for each version. Customer commands describe the old implementation and cannot reproduce that run with the current code.
