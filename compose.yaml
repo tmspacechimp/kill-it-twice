@@ -53,8 +53,22 @@ services:
       DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
     ports:
       - "${DASHBOARDS_PORT:-5601}:5601"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:5601/api/status"]
+      interval: ${DEFAULT_HEALTHCHECK_INTERVAL}
+      timeout: ${DEFAULT_HEALTHCHECK_TIMEOUT}
+      retries: ${DEFAULT_HEALTHCHECK_RETRIES}
+      start_period: ${DEFAULT_HEALTHCHECK_START_PERIOD}
     depends_on:
       opensearch:
+        condition: service_healthy
+  dashboards-setup:
+    image: opensearchproject/opensearch-dashboards:3.4.0
+    entrypoint: ["/usr/share/opensearch-dashboards/node/bin/node", "/setup/setup.mjs"]
+    volumes:
+      - ./docker/dashboards/setup.mjs:/setup/setup.mjs:ro
+    depends_on:
+      dashboards:
         condition: service_healthy
   rabbitmq:
     hostname: rabbitmq
@@ -82,6 +96,8 @@ services:
       RABBITMQ_USER: local
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
       OPENSEARCH_URL: http://opensearch:9200
+      POLL_INTERVAL_MS: ${POLL_INTERVAL_MS:-1000}
+      POLL_MAX_EMPTY: ${POLL_MAX_EMPTY:-3}
       PGHOST: postgres
       PGPORT: 5432
       PGDATABASE: client_source

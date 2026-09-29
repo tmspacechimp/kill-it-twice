@@ -5,3 +5,5 @@ export type ShipmentEvent = {
   status: 'created' | 'in_transit' | 'delivered' | 'cancelled';
   occurred_at: Date;
 };
+
+export type ProcessRecord = (event: ShipmentEvent) => Promise<void>;

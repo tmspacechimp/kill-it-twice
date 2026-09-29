@@ -7,6 +7,7 @@ export interface ShipmentEvent {
 }
 
 export const DEFAULT_SHIPMENTS = 4_000;
+
 // The generated event IDs must fit PostgreSQL's signed integer column.
 export const MAX_SHIPMENTS = 858_993_458;
 
@@ -18,14 +19,17 @@ export function validateShipmentCount(count: number): void {
 
 export function* generateEvents(count = DEFAULT_SHIPMENTS): Generator<ShipmentEvent> {
   validateShipmentCount(count);
+
   const epoch = Date.parse('2025-01-01T00:00:00.000Z');
   let id = 0;
+
   for (let shipment = 1; shipment <= count; shipment++) {
-    const statuses: ShipmentEvent['status'][] = shipment % 2 === 1
-      ? ['created', 'in_transit', 'delivered']
-      : ['created', 'cancelled'];
+    const statuses: ShipmentEvent['status'][] =
+      shipment % 2 === 1 ? ['created', 'in_transit', 'delivered'] : ['created', 'cancelled'];
+
     for (const [index, status] of statuses.entries()) {
       id++;
+
       yield {
         id,
         shipment_id: shipment,

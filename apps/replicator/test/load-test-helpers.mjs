@@ -2,63 +2,74 @@ import { Logger } from '@nestjs/common';
 import { Client } from 'pg';
 import { ShipmentSourceService } from '../dist/shipment-source.service.js';
 import { InitialLoadService } from '../dist/initial-load.service.js';
+import { IncrementalLoadService } from '../dist/incremental-load.service.js';
+import { ReplicationService } from '../dist/replication.service.js';
 
-// Only IDs matter to the reader. Destination tests use a complete event.
 export function eventsFrom(firstId, count) {
   return Array.from({ length: count }, (_, offset) => ({ id: firstId + offset }));
 }
 
-export function postgresError(message, code) {
-  const error = new Error(message);
-  error.code = code;
-  return error;
-}
-
-// Runs the real workflow and source reader; replaces only PostgreSQL and logging.
-export function setupLoad(testContext, options) {
-  const database = fakePostgres(testContext, options);
+export function setupLoad(
+  t,
+  {
+    boundary = 1,
+    initialReads = [[{ id: 1 }]],
+    pollingReads = [[], [], []],
+    connectionError,
+    onLog = () => {},
+  } = {},
+) {
+  const database = { reads: [], closed: [], connections: [], boundaryReads: 0 };
+  const readers = new Map();
+  const pendingInitial = [...initialReads];
+  const pendingPolling = [...pollingReads];
   const logs = [];
-  testContext.mock.method(Logger.prototype, 'log', (message) => logs.push(message));
 
-  return {
-    loader: new InitialLoadService(new ShipmentSourceService()),
-    database,
-    logs,
-  };
-}
+  t.mock.method(Logger.prototype, 'log', (message) => {
+    logs.push(message);
+    onLog(message);
+  });
 
-function fakePostgres(testContext, { readResults, connectionError, commitError }) {
-  const pendingReads = [...readResults];
-  const database = {
-    commands: [],
-    reads: [],
-    connectionOptions: undefined,
-    connectionAttempts: 0,
-    closeCalls: 0,
-  };
-
-  testContext.mock.method(Client.prototype, 'connect', async function () {
-    database.connectionAttempts += 1;
-    database.connectionOptions = this.connectionParameters.options;
+  t.mock.method(Client.prototype, 'connect', async function () {
+    const reader = readers.size === 0 ? 'initial' : 'polling';
+    readers.set(this, reader);
+    database.connections.push({ reader, options: this.connectionParameters.options });
     if (connectionError) throw connectionError;
   });
 
-  testContext.mock.method(Client.prototype, 'end', async () => {
-    database.closeCalls += 1;
+  t.mock.method(Client.prototype, 'end', async function () {
+    database.closed.push(readers.get(this));
   });
 
-  testContext.mock.method(Client.prototype, 'query', async (sql, parameters) => {
-    database.commands.push(sql);
-    if (sql === 'COMMIT' && commitError) throw commitError;
-    if (!sql.startsWith('SELECT')) return { rows: [] };
+  t.mock.method(Client.prototype, 'query', async function (sql, values) {
+    const reader = readers.get(this);
 
-    database.reads.push({ sql, parameters });
-    if (pendingReads.length === 0) throw new Error('Unexpected extra database read');
+    if (sql.startsWith('SELECT max(id)')) {
+      database.boundaryReads++;
+      if (boundary instanceof Error) throw boundary;
+      return { rows: [{ last_id: boundary }] };
+    }
 
-    const result = pendingReads.shift();
+    database.reads.push({ reader, sql, values });
+    const pending = reader === 'initial' ? pendingInitial : pendingPolling;
+    if (pending.length === 0) throw new Error(`Unexpected ${reader} read`);
+
+    const result = pending.shift();
     if (result instanceof Error) throw result;
     return { rows: result };
   });
 
-  return database;
+  const source = new ShipmentSourceService();
+  const loader = new ReplicationService(
+    source,
+    new InitialLoadService(source),
+    new IncrementalLoadService(source),
+  );
+
+  async function run(processRecord = async () => {}, options = {}) {
+    const { signal = new AbortController().signal, ...polling } = options;
+    await loader.run(processRecord, { intervalMs: 1, maxEmptyPolls: 3, ...polling }, signal);
+  }
+
+  return { run, database, logs };
 }

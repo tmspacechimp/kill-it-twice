@@ -43,7 +43,7 @@ export class PublisherService {
       contentType: 'application/json',
       persistent: false,
     });
-    // One outstanding message: await broker acceptance before advancing.
+    // Each reader waits for confirmation; at most two publications can be outstanding.
     await this.channel.waitForConfirms();
   }
 

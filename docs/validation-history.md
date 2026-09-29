@@ -1,5 +1,115 @@
 # Validation history
 
+## Delayed incremental startup — 2026-09-29
+
+The empty-poll limit now activates only after the first incremental rows arrive.
+Startup empty reads wait at the configured interval without increasing the
+counter, including after initial loading finishes. This supersedes the earlier
+same-day rule that counted empty reads immediately.
+
+`npm test --prefix apps/replicator` passed all 18 tests, with formatting, lint,
+typechecking, and compilation. The regression supplies five startup empty
+reads with a limit of three, then a new row, then three empty reads; only the
+last three count toward stopping. Existing tests cover counter resets and
+shutdown while waiting. `git diff --check` passed. No Docker run was performed.
+
+Updated the incremental service, initial/incremental tests and test guide,
+SPEC, AGENTS, README, development documentation, and the environment comment.
+
+## Startup boundary and finite concurrent polling — 2026-09-29
+
+The operating rule now captures the startup maximum event ID, loads rows up to
+that boundary, and polls above it concurrently on a separate read-only
+connection. Polling stops after three consecutive empty reads by default;
+nonempty reads reset the count. Initial loading finishes independently.
+
+`npm test --prefix apps/replicator` passed all 17 tests, including formatting,
+lint, typechecking, and compilation. The concurrency test holds an initial
+event open until an incremental event is processed and polling has stopped,
+then verifies that connections remain open until the initial load finishes.
+Other checks cover the fixed upper bound, negative/zero/sparse IDs, empty
+startup, missing table, counter resets, sibling cancellation, and shutdown.
+
+`git diff --check` passed. `git rm -r --cached --ignore-unmatch -- .air` removed
+editor state from the index; `git ls-files .air` returned no files. Local files
+were retained, and `git check-ignore` confirmed they are ignored.
+
+Changed implementation files: `shipment-source.service.ts`,
+`initial-load.service.ts`, `main.ts`, `shipment-event.ts`, the publisher's
+concurrency comment, and new `replication.service.ts`,
+`incremental-load.service.ts`, and `polling-options.ts`. Updated the reader
+tests, their helper and guide, Compose/environment settings, SPEC, README,
+development instructions, AGENTS, and the root Git ignore rules.
+
+No Docker rebuild or live pipeline run was performed for this revision. These
+are focused checks with mocked external services, not failure-gate evidence.
+The older records below describe earlier operating rules.
+
+## Paced source generation — 2026-09-28
+
+The source writer now exposes initial seeding and paced generation as its two
+primary workflows; manual append remains a secondary option.
+
+- `npm test --prefix apps/source-writer`: 17 passed, 0 failed, including exact
+  event counts, lazy histories, pacing with slow writes, cancellation, failure
+  handling, and argument validation before connection.
+- `wsl --cd /mnt/c/work/kill-it-twice --exec make generate COUNT=500 RATE=20`:
+  exited 0 and printed `Generation complete: inserted=500`. Make built the
+  source-writer image and ran it against existing PostgreSQL with `--no-deps`.
+- The 500 committed events had IDs 10003 through 10502 and shipment IDs 4002
+  through 4168 (167 shipments). The first timestamp was
+  `2026-09-28T18:57:08.739Z`; the last was `2026-09-28T18:57:33.711Z`, a span of
+  24.972 seconds. The final shipment had version 2 / `in_transit`, as expected
+  for a partial last history. These demo rows remain in the source.
+
+This is a local happy-path observation, not a throughput or failure-gate claim.
+
+## Incremental shipment validation — 2026-09-28 (issue #21)
+
+The existing local project began with 10,000 events for 4,000 shipments. Built
+only the source-writer and replicator, preserving the running infrastructure
+and its volumes. Commands and actual results:
+
+- `npm test --prefix apps/source-writer`: 12 passed, 0 failed.
+- `npm test --prefix apps/replicator`: 19 passed, 0 failed; formatting, lint,
+  typecheck, and compilation passed. Existing CRLF files were normalized to
+  match the workspace's LF formatting setting. Node tests required execution
+  outside the Windows sandbox because subprocess creation returned `EPERM`.
+- `docker-compose build replicator source-writer`: both images built.
+- `docker-compose up -d --no-deps replicator`: Compose 1.29.2 failed with
+  `ContainerConfig`; `docker compose up -d --no-deps replicator` succeeded
+  with Compose v2.40.3. Only the replicator container was recreated.
+- The replicator completed 10 batches / 10,000 rows and logged
+  `Polling for shipment events: intervalMs=1000 afterId=10000`.
+
+Then ran these two commands serially after initial completion:
+
+```sh
+docker-compose run --rm --no-deps -T source-writer append 4001 created
+docker-compose run --rm --no-deps -T source-writer append 4001 in_transit
+docker compose logs --no-color --tail=4 replicator
+docker-compose logs --no-color --tail=10 consumer
+docker-compose exec -T postgres psql -X -U source -d client_source -c "SELECT * FROM public.shipment_status_events WHERE shipment_id = 4001 ORDER BY version;"
+docker-compose exec -T opensearch curl --fail --silent http://localhost:9200/shipments/_doc/4001
+docker compose ps replicator
+```
+
+Observed source rows and matching consumer events:
+
+| Event ID | Shipment | Version | Status | Timestamp (UTC) |
+| --- | --- | --- | --- | --- |
+| 10001 | 4001 | 1 | created | 2026-09-28T17:48:11.135Z |
+| 10002 | 4001 | 2 | in_transit | 2026-09-28T17:48:14.226Z |
+
+The replicator logged two incremental batches of one row each. Both full
+`shipment.status` events appeared in consumer logs. OpenSearch returned one
+document, `_id: "4001"`, `_version: 2`, with event 10002 and status
+`in_transit`. The replicator remained Up. The two appended demo rows remain
+in the source; no history or volumes were deleted.
+
+This validates the serial happy path only. It does not establish concurrent
+capture, restart recovery, durable delivery, or any assignment failure gate.
+
 ## Dashboards inspection (issue #22) - 2026-09-28
 
 The first startup attempt with Dashboards 3.3.2 failed with `manifest unknown`. Registry checks confirmed matching OpenSearch and Dashboards 3.4.0 images; Compose now pins both to that version. Validation used fresh project `issue22-dashboards-check`, preserving existing projects and volumes. From a WSL shell at the repository root:

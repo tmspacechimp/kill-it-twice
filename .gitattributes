@@ -1,0 +1,2 @@
+# Match the replicator's Prettier configuration on Windows and Linux.
+apps/replicator/** text eol=lf

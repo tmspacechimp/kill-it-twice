@@ -4,9 +4,11 @@ For a quick start, see the [README](../README.md). The [specification](../SPEC.m
 
 ## Current application behavior (shipments)
 
-The replicator waits for seeded shipment events and reads one repeatable-read, read-only PostgreSQL snapshot in batches of at most 1,000. The first query has no lower ID bound; subsequent queries use `id > lastId`, ordered by ID. Missing or empty data is checked once per second; other source errors fail the process.
+The replicator reads the maximum event ID once at startup. Existing rows through that boundary form the initial load. A separate read-only connection immediately polls for greater IDs while initial loading is in progress. Both readers use batches of at most 1,000, ordered by ID. An empty table means zero initial rows; a missing table fails with instructions to seed first. The single serial, append-only writer assumption makes the ID boundary valid without a long-lived snapshot transaction.
 
-For each row, it awaits a versioned PUT to `shipments/_doc/<shipment ID>` in OpenSearch, then publishes a JSON event to RabbitMQ queue `shipments.initial-load` and awaits broker confirmation. Every event is published, including older or replayed versions. Only a higher shipment version replaces the OpenSearch document; recognized version conflicts continue to publication, while other errors stop the load. Both destinations contain all five event fields; timestamps use ISO UTC strings. Each batch finishes before the next source read. After the snapshot completes, the replicator closes its connections and exits.
+For each row, each reader awaits a versioned PUT to `shipments/_doc/<shipment ID>` in OpenSearch, then publishes a JSON event to RabbitMQ queue `shipments.initial-load` and awaits broker confirmation. Every event is published, including older or replayed versions. Only a higher shipment version replaces the OpenSearch document; recognized version conflicts continue to publication, while other errors stop processing. Both destinations contain all five event fields; timestamps use ISO UTC strings. The readers can interleave events, so consumer logs need not be in event-ID or shipment-version order.
+
+Polling waits indefinitely for the first incremental rows; startup empty reads do not count. After the first nonempty incremental batch, polling stops after `POLL_MAX_EMPTY` consecutive empty reads (default 3); any later nonempty batch resets the counter. Full batches drain immediately; empty or partial batches wait `POLL_INTERVAL_MS` (default 1000), except after the final empty read. The first poll is immediate. If no incremental rows arrive, polling stays alive until shutdown or error, even after initial loading finishes. Polling may stop before initial loading finishes, and does not restart automatically. The process exits after both readers finish. SIGINT/SIGTERM stop between records and interrupt waits; failures cancel the sibling reader before cleanup.
 
 The independent plain TypeScript consumer connects only to RabbitMQ and logs each complete event. It stays subscribed after the replicator exits. Events look like this (illustrative shape):
 
@@ -37,26 +39,28 @@ The following is the shipment workflow. Expected results for a fresh seed are 10
 From the repository root:
 
 ```sh
+docker-compose up -d postgres
+# Wait for PostgreSQL to become healthy.
+make seed
 docker-compose up --build
 ```
 
 With the Compose plugin, the equivalent startup command is `docker compose up --build`; the seed target still requires standalone `docker-compose`. Add `-d` to run in the background. In another terminal, after infrastructure is healthy:
 
 ```sh
-make seed
 docker-compose logs --no-color --follow replicator consumer
 ```
 
-Compose waits for the replicator's three infrastructure dependencies and the consumer's RabbitMQ dependency. The consumer does not depend on the replicator or source. On an empty source, the reader should log `Waiting for seeded records in public.shipment_status_events` before seeding.
+Compose waits for the replicator's three infrastructure dependencies and the consumer's RabbitMQ dependency. The consumer does not depend on the replicator or source. Seed before starting the replicator. Startup logs show `Startup boundary: lastId=10000` for the default fixture, followed by both readers starting work.
 
 For 10,000 seeded rows, expected progress ends with:
 
 ```text
-Batch 10: rows=1000 firstId=9001 lastId=10000 total=10000
+Initial batch 10: rows=1000 firstId=9001 lastId=10000 total=10000
 Initial load complete: rows=10000 batches=10
 ```
 
-The [shipment validation](validation-history.md#shipment-validation--2026-09-28) produced these completion logs.
+The older [shipment validation](validation-history.md#shipment-validation--2026-09-28) records the earlier sequential implementation; its log prefix and lifecycle predate the current rule.
 
 Inspect shipment 1 and its latest event (ID 3) across the three systems:
 
@@ -83,7 +87,7 @@ docker-compose exec -T rabbitmq rabbitmqctl list_queues name messages_ready mess
 
 An empty queue while the consumer is running is not proof that every event was logged. To observe queued publications manually, start the replicator with the consumer stopped, wait for completion, inspect the queue, then start the consumer. Rerunning the replicator republishes the snapshot.
 
-After successful completion, expect the replicator to be exited with code 0 and the consumer to remain running. Run a fresh load with `docker-compose start replicator`. To stop and remove containers while retaining data, use `docker-compose down`. No walkthrough step requires deleting existing volumes.
+After both initial loading and polling complete, expect the replicator to exit with code 0 while the consumer remains running. To observe live generation manually, run `make generate COUNT=500 RATE=20` in another terminal when ready; startup polling waits for this first activity; see [live traffic generation](../README.md#generate-live-traffic). New rows after polling stops need another run. Run a fresh full load with `docker-compose restart replicator`, which can republish duplicates. To stop and remove containers while retaining data, use `docker-compose down`. No walkthrough step requires deleting existing volumes.
 
 A clean-source walkthrough needs unused volumes. Use a new `COMPOSE_PROJECT_NAME` and unused host ports, consistently for Compose and `make seed`, to preserve existing data. Application image tags remain shared.
 
@@ -93,17 +97,16 @@ Normal Compose startup includes OpenSearch Dashboards 3.4.0, matching OpenSearch
 
 ```sh
 docker-compose config --quiet
-docker-compose up -d dashboards
+docker compose up -d dashboards dashboards-setup
 docker-compose logs --tail=30 dashboards
 ```
 
 Open [OpenSearch Dashboards](http://localhost:5601). Set `DASHBOARDS_PORT` in `.env` to override the host port; existing configurations without it use 5601. Dashboards connects to the internal OpenSearch HTTP address, independently of `OPENSEARCH_PORT`. Both security plugins are disabled for this local demo, so no login is required. Startup can take a minute after OpenSearch is healthy.
 
-1. Complete the initial load above. Dismiss the enhanced Discover announcement if offered, then choose **Explore on my own** on the welcome screen.
-2. Open **Management > Dashboards Management** from the main navigation (or **Manage** on Home). In **Management menu**, choose **Index patterns**, then **Create index pattern**. Enter `shipments` and continue to the next step. If it does not match an index, check the replicator logs: OpenSearch creates `shipments` on its first indexed event.
-3. Choose **I don't want to use the time filter**, then create the pattern. The seed timestamps are in January 2025, so a default recent-time filter would hide them. If you choose `occurred_at` instead, set an absolute time range covering your source events.
-4. Open **Discover**, select the `shipments` pattern, and search `shipment_id: 1`. Expand the document and inspect `shipment_id`, `version`, `status`, `id`, and `occurred_at`. With a fresh default seed, expect shipment 1, version 3, status `delivered`, event ID 3. Shipment 2 should have version 2 and status `cancelled`.
-5. Use **Refresh** after indexing changes. Search visibility follows OpenSearch's refresh timing. Existing data may contain higher versions than the sample; compare with `shipments/_doc/1` using the inspection command above.
+1. Wait for `dashboards-setup` to exit with code 0. Inspect its output with `docker compose logs dashboards-setup`. Normal Compose startup includes this service; for an existing stack use `docker compose up -d dashboards dashboards-setup`.
+2. Open [shipments in Discover](http://localhost:5601/app/discover#/?_a=%28columns%3A!%28shipment_id%2Cversion%2Cstatus%2Cid%2Coccurred_at%29%2Cindex%3Ashipments%29). The setup service creates the pattern with a stable ID and no time filter, so the January 2025 seed timestamps remain visible. It preserves a compatible existing pattern on reruns and sets the default Discover columns to `shipment_id`, `version`, `status`, `id`, and `occurred_at`. The direct link includes those columns so an earlier browser session cannot restore the whole-document view.
+3. Once replication has written data, search `shipment_id: 1`. Expand the document and inspect `shipment_id`, `version`, `status`, `id`, and `occurred_at`. With a fresh default seed, expect shipment 1, version 3, status `delivered`, event ID 3.
+4. Use **Refresh** after indexing changes. Search visibility follows OpenSearch's refresh timing. If you opened Discover before any shipment data existed, reopen the link after the initial writes. Existing data may contain higher versions than the sample.
 
 Dashboards shows the current projection, not the complete source event history. Its saved index pattern lives in OpenSearch. It is an inspection tool, not the assignment's operator UI for pipeline controls, lag, DLQ, or failure simulation.
 
@@ -111,7 +114,18 @@ Dashboards shows the current projection, not the complete source event history. 
 
 `make seed` builds and runs the independent TypeScript source-writer CLI against the running PostgreSQL service, user `source`, database `client_source`. Its Compose service is behind the `seed` profile, so normal startup does not seed automatically. The disposable writer runs with `--no-deps` and does not start PostgreSQL, the replicator, or the consumer, or reset volumes.
 
-Use `make seed SEED_ARGS="--shipments 3"` for a smaller initial fixture (eight events). Counts must be positive integers whose generated IDs fit PostgreSQL integer columns. Runs always start at shipment/event ID 1; smaller counts retain existing data, and larger counts add missing initial histories. There are no commands for later transitions or timed generation.
+Use `make seed SEED_ARGS="--shipments 3"` for a smaller initial fixture (eight events). Counts must be positive integers whose generated IDs fit PostgreSQL integer columns. Runs always start at shipment/event ID 1; smaller counts retain existing data, and larger counts add missing initial histories. Complete seeding before generating: later fixture extensions can collide with appended IDs or insert behind the reader's cursor.
+
+The second main workflow is `make generate COUNT=500 RATE=20`. COUNT means events,
+RATE means target events per second. It starts new shipments above the current
+maximum ID and produces created/in_transit/delivered histories lazily, stopping
+at exactly COUNT even within a history. Each event uses the serial append
+transaction, commits before the next write, and is printed. Pacing accounts for
+write time without concurrent writes or catch-up bursts. Already committed
+events remain on interruption or error. Generate requires a table created by
+seed; it starts no other services. There is no retry or restart continuation.
+
+For occasional manual events, use `docker-compose run --rm --no-deps -T source-writer append SHIPMENT_ID STATUS`. Run only one writer command at a time. Append inserts one row with maximum event ID plus one and maximum shipment version plus one, then prints it after commit. A new shipment starts at version 1. There is no transition state machine.
 
 The seed creates only `public.shipment_status_events`:
 
@@ -163,7 +177,7 @@ npm test --prefix apps/source-writer
 
 The source-writer tests check deterministic histories without PostgreSQL and use a fake query client to check bounded inserts and transaction handling. They do not check replication or failure gates. For local seeding, set the standard PostgreSQL environment variables and run `npm start --prefix apps/source-writer -- --shipments 4000`; use `--help` for usage. The CLI does not load `.env` itself.
 
-See the [test reading guide](../apps/replicator/test/README.md) for the 14 scenarios and commands for running individual test files.
+See the [test reading guide](../apps/replicator/test/README.md) for scenarios and commands for running individual test files.
 
 The replicator tests compile TypeScript and use mocked clients to inspect bounded reads, waiting, cleanup, destination errors, JSON fields, and publication confirmation. They are not automated pipeline or failure-gate checks.
 
@@ -180,8 +194,8 @@ All application Dockerfiles compile TypeScript and ship runtime dependencies as 
 
 ## Limitations
 
-This is a sequential initial-load POC, not a throughput benchmark. The long-lived read snapshot can delay PostgreSQL cleanup. Later source changes are outside it; restarting loads the snapshot again, retains the highest shipment versions, and can emit duplicate events. Stale destination documents are not deleted.
+This is a concurrent initial-load and finite-polling POC, not a throughput benchmark. Correct discovery assumes one serial writer whose IDs increase with commits; concurrent transactions committing out of ID order can be missed. After receiving its first incremental rows, polling stops permanently for this run after consecutive empty reads, even if initial loading is still active. Restarting loads the full current dataset again, retains the highest shipment versions, and can emit duplicate events. Stale destination documents are not deleted.
 
 Indexing and publication are separate operations. The queue and events are non-durable/non-persistent; the consumer uses automatic acknowledgement, so an event may be lost before logging. Broker confirmation is not evidence of consumer logging or atomic delivery to both destinations.
 
-There is no incremental sync, checkpoint, retry/reconnect policy, DLQ, receipt storage, operator UI, recovery mechanism, or failure-gate claim. Empty-source readiness polling and infrastructure health checks are not delivery guarantees. No `make verify` or automated outcome gate is provided.
+There is no durable checkpoint, retry/reconnect policy, DLQ, receipt storage, operator UI, recovery mechanism, or failure-gate claim. Polling and infrastructure health checks are not delivery guarantees. No `make verify` or automated outcome gate is provided.
