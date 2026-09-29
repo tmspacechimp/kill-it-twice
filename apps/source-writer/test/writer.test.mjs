@@ -19,12 +19,18 @@ test('writer awaits bounded parameterized inserts and commits the partial last b
         const generatedBeforeInsert = generated;
         const count = values.length / 5;
         assert.equal(count, generated === 1000 ? 1000 : 3);
-        assert.equal(generated, calls.filter((s) => s.startsWith('INSERT')).length === 1 ? 1000 : 1003);
+        assert.equal(
+          generated,
+          calls.filter((s) => s.startsWith('INSERT')).length === 1 ? 1000 : 1003,
+        );
         assert.match(sql, /ON CONFLICT \(id\) DO NOTHING$/);
         assert.match(sql, new RegExp(`\\$${values.length}\\)`));
-        assert.deepEqual(values.slice(0, 5), generated === 1000
-          ? [1, 1, 1, 'created', '2025-01-01T00:01:00.000Z']
-          : [1001, 401, 1, 'created', '2025-01-01T16:41:00.000Z']);
+        assert.deepEqual(
+          values.slice(0, 5),
+          generated === 1000
+            ? [1, 1, 1, 'created', '2025-01-01T00:01:00.000Z']
+            : [1001, 401, 1, 'created', '2025-01-01T16:41:00.000Z'],
+        );
         await new Promise((resolve) => setImmediate(resolve));
         assert.equal(generated, generatedBeforeInsert);
         return { rowCount: count };
@@ -39,7 +45,11 @@ test('writer awaits bounded parameterized inserts and commits the partial last b
 });
 
 test('rerun reporting uses the database inserted count', async () => {
-  const db = { async query() { return { rowCount: 0 }; } };
+  const db = {
+    async query() {
+      return { rowCount: 0 };
+    },
+  };
   assert.equal(await writeEvents(db, generateEvents(2)), 0);
 });
 

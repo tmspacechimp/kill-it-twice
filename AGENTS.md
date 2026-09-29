@@ -1,6 +1,10 @@
 # Instructions for coding agents
 
-Read `SPEC.md` before editing. Its v0 scope is an initial-load proof of concept; `docs/project-brief-en.md` summarizes the broader problem, and `docs/optio-assignment-original-ka.md` is the original assignment. Work on one small requested task at a time and report files changed, commands run, and actual results.
+Read `SPEC.md` before editing. It defines the current operating rules; `docs/project-brief-en.md` summarizes the broader problem, and `docs/optio-assignment-original-ka.md` is the original assignment. Work on one small requested task at a time and report files changed, commands run, and actual results.
+
+- Readability is the number one code-quality priority. The developer must be able to read and verify every change. Prefer small, clearly named functions, explicit control flow, descriptive variables, and whitespace between logical steps. Avoid dense expressions, long functions, deeply nested callbacks, and unnecessary abstractions. Review new code and rewrites for readability before presenting them; formatting alone is not enough.
+- Replicator operating rule: capture the source rows present at startup as the initial load. Process that bounded initial dataset and poll for later rows concurrently. Wait for the first incremental rows without counting empty polls. Only after incremental rows have arrived, stop polling after the configured number of consecutive empty polls, resetting the count when more rows arrive. Finish the initial load before exiting. Keep the single serial, append-only writer assumption explicit; do not silently change this startup-wait and post-activity idle-stop rule.
+- Keep `.air/` local and ignored by Git; do not commit editor plans or state.
 
 - Before starting work on an issue, look for its linked development branch and check it out if one exists. Preserve any uncommitted changes when switching branches.
 - Keep the source PostgreSQL database client-like. The replicator reads it; neither application stores its internal state there. `make seed` is only for sample data.

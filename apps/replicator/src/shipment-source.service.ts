@@ -4,65 +4,74 @@ import type { ShipmentEvent } from './shipment-event.js';
 
 export const BATCH_SIZE = 1_000;
 const COLUMNS = 'id, shipment_id, version, status, occurred_at';
-const MISSING_TABLE_ERROR_CODE = '42P01';
+
+function createReadOnlyClient(): Client {
+  return new Client({
+    connectionTimeoutMillis: 5_000,
+    options: '-c default_transaction_read_only=on',
+  });
+}
 
 @Injectable()
 export class ShipmentSourceService {
-  private client!: Client;
+  private readonly initialClient = createReadOnlyClient();
+  private readonly pollingClient = createReadOnlyClient();
 
   async connect(): Promise<void> {
-    this.client = new Client({
-      connectionTimeoutMillis: 5_000,
-      options: '-c default_transaction_read_only=on',
-    });
-    await this.client.connect();
+    await this.initialClient.connect();
+    await this.pollingClient.connect();
   }
 
   async close(): Promise<void> {
-    // Disconnecting also rolls back a snapshot left open by a failed load.
-    await this.client.end();
+    const results = await Promise.allSettled([this.initialClient.end(), this.pollingClient.end()]);
+
+    for (const result of results) {
+      if (result.status === 'rejected') throw result.reason;
+    }
   }
 
-  async beginSnapshot(): Promise<void> {
-    await this.client.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
-  }
-
-  async commitSnapshot(): Promise<void> {
-    await this.client.query('COMMIT');
-  }
-
-  async rollbackSnapshot(): Promise<void> {
-    await this.client.query('ROLLBACK');
-  }
-
-  async readFirstBatch(): Promise<ShipmentEvent[]> {
+  async readStartupBoundary(): Promise<number | null> {
     try {
-      const result = await this.client.query<ShipmentEvent>(
-        `SELECT ${COLUMNS} FROM public.shipment_status_events ORDER BY id LIMIT $1`,
-        [BATCH_SIZE],
+      const result = await this.initialClient.query<{ last_id: number | null }>(
+        'SELECT max(id) AS last_id FROM public.shipment_status_events',
       );
-      return result.rows;
-    } catch (error: unknown) {
-      // The seed creates this table; all other database errors fail the load.
-      if (this.isMissingTable(error)) return [];
+
+      return result.rows[0].last_id;
+    } catch (error) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === '42P01'
+      ) {
+        throw new Error('Source table is missing. Run make seed before starting the replicator.', {
+          cause: error,
+        });
+      }
+
       throw error;
     }
   }
 
-  async readNextBatch(lastId: number): Promise<ShipmentEvent[]> {
-    const result = await this.client.query<ShipmentEvent>(
-      `SELECT ${COLUMNS} FROM public.shipment_status_events WHERE id > $1 ORDER BY id LIMIT $2`,
-      [lastId, BATCH_SIZE],
+  async readInitialBatch(lastId: number | null, boundary: number): Promise<ShipmentEvent[]> {
+    const result = await this.initialClient.query<ShipmentEvent>(
+      `SELECT ${COLUMNS} FROM public.shipment_status_events
+       WHERE ($1::integer IS NULL OR id > $1) AND id <= $2
+       ORDER BY id LIMIT $3`,
+      [lastId, boundary, BATCH_SIZE],
     );
+
     return result.rows;
   }
 
-  private isMissingTable(error: unknown): boolean {
-    return (
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      error.code === MISSING_TABLE_ERROR_CODE
+  async readNewBatch(lastId: number | null): Promise<ShipmentEvent[]> {
+    const result = await this.pollingClient.query<ShipmentEvent>(
+      `SELECT ${COLUMNS} FROM public.shipment_status_events
+       WHERE ($1::integer IS NULL OR id > $1)
+       ORDER BY id LIMIT $2`,
+      [lastId, BATCH_SIZE],
     );
+
+    return result.rows;
   }
 }
