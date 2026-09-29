@@ -18,14 +18,14 @@ The independent plain TypeScript consumer connects only to RabbitMQ and logs eac
 
 ## Prerequisites
 
-Use Docker with Linux containers, Compose, and GNU Make. The existing Makefile invokes the standalone `docker-compose` command, so that command must be available to Make. The Compose plugin can run the same configuration with `docker compose`. The recorded runs used standalone Compose 1.29.2.
+Use Docker with Linux containers, Compose v2 (`docker compose`), and GNU Make. Run Make from WSL on Windows. `make help` lists the demo commands. The Makefile uses Compose v2 for health-aware startup.
 
 Allow at least 4 GB of Docker memory. OpenSearch needs `vm.max_map_count >= 262144` on the Docker Linux host/VM; see the [OpenSearch Docker prerequisites](https://docs.opensearch.org/latest/install-and-configure/install-opensearch/docker/).
 
 Copy `.env.example` to `.env` and set both passwords. In PowerShell:
 
 ```powershell
-Copy-Item .env.example .env
+wsl --exec make init
 ```
 
 Do not overwrite an existing local configuration. Infrastructure host ports come from `.env` and bind to all interfaces. OpenSearch uses unauthenticated HTTP for this local demo. Defaults are PostgreSQL 5432, OpenSearch 9200, RabbitMQ 5672, and RabbitMQ management 15672.
@@ -39,16 +39,16 @@ The following is the shipment workflow. Expected results for a fresh seed are 10
 From the repository root:
 
 ```sh
-docker-compose up -d postgres
-# Wait for PostgreSQL to become healthy.
+make build
+make infra
 make seed
-docker-compose up --build
+make up
 ```
 
-With the Compose plugin, the equivalent startup command is `docker compose up --build`; the seed target still requires standalone `docker-compose`. Add `-d` to run in the background. In another terminal, after infrastructure is healthy:
+Follow application output in another terminal:
 
 ```sh
-docker-compose logs --no-color --follow replicator consumer
+make logs
 ```
 
 Compose waits for the replicator's three infrastructure dependencies and the consumer's RabbitMQ dependency. The consumer does not depend on the replicator or source. Seed before starting the replicator. Startup logs show `Startup boundary: lastId=10000` for the default fixture, followed by both readers starting work.
@@ -65,29 +65,25 @@ The older [shipment validation](validation-history.md#shipment-validation--2026-
 Inspect shipment 1 and its latest event (ID 3) across the three systems:
 
 ```sh
-docker-compose exec -T postgres psql -X -U source -d client_source -c "SELECT * FROM public.shipment_status_events WHERE shipment_id = 1 ORDER BY version;"
-docker-compose exec -T opensearch curl --fail --silent http://localhost:9200/shipments/_doc/1
-docker-compose logs --no-color consumer
-docker-compose ps -a
+make history ID=1
+make shipment ID=1
+make logs SERVICES=consumer TAIL=all
+make status
 ```
 
 The OpenSearch response should have `_id: "1"` with event ID 3, version 3, and status `delivered`. The index should contain 4,000 documents after refresh, while consumer logs should contain 10,000 events. Find `"sourceId":3,` in the consumer output and compare its `record`. GET by document ID does not require waiting for the search refresh interval. These inspection commands use container ports, independent of host port overrides.
 
-For a filtered log in PowerShell:
-
-```powershell
-docker-compose logs --no-color consumer | Select-String -SimpleMatch '"sourceId":3,'
-```
+Use `make counts` to compare source event/shipment totals with the indexed document count. Search counts follow the normal OpenSearch refresh interval. Ctrl+C stops log following without stopping the consumer.
 
 Inspect the queue independently:
 
 ```sh
-docker-compose exec -T rabbitmq rabbitmqctl list_queues name messages_ready messages_unacknowledged consumers
+make queue
 ```
 
-An empty queue while the consumer is running is not proof that every event was logged. To observe queued publications manually, start the replicator with the consumer stopped, wait for completion, inspect the queue, then start the consumer. Rerunning the replicator republishes the snapshot.
+An empty queue while the consumer is running is not proof that every event was logged. To observe queued publications manually, use `make stop SERVICES=consumer`, then `make restart`. Wait for `Initial load complete`, inspect with `make queue`, then run `make up SERVICES=consumer`. The replicator still waits for incremental traffic; initial completion alone does not stop it. Rerunning the replicator republishes the snapshot.
 
-After both initial loading and polling complete, expect the replicator to exit with code 0 while the consumer remains running. To observe live generation manually, run `make generate COUNT=500 RATE=20` in another terminal when ready; startup polling waits for this first activity; see [live traffic generation](../README.md#generate-live-traffic). New rows after polling stops need another run. Run a fresh full load with `docker-compose restart replicator`, which can republish duplicates. To stop and remove containers while retaining data, use `docker-compose down`. No walkthrough step requires deleting existing volumes.
+After both initial loading and polling complete, expect the replicator to exit with code 0 while the consumer remains running. To observe live generation manually, run `make generate COUNT=500 RATE=20` in another terminal when ready; startup polling waits for this first activity; see [live traffic generation](../README.md#generate-live-traffic). New rows after polling stops need another run. Run a fresh full load with `make restart`, which can republish duplicates. To stop and remove containers while retaining data, use `make down`. No walkthrough step requires deleting existing volumes.
 
 A clean-source walkthrough needs unused volumes. Use a new `COMPOSE_PROJECT_NAME` and unused host ports, consistently for Compose and `make seed`, to preserve existing data. Application image tags remain shared.
 
@@ -96,14 +92,13 @@ A clean-source walkthrough needs unused volumes. Use a new `COMPOSE_PROJECT_NAME
 Normal Compose startup includes OpenSearch Dashboards 3.4.0, matching OpenSearch. Issue #22 moves OpenSearch from 3.3.2 to 3.4.0 because a matching Dashboards 3.3.2 image is unavailable. Starting this configuration against an existing project upgrades its OpenSearch container; use a separate project and unused ports for a fresh-data check that preserves the old volumes. To start Dashboards and its OpenSearch dependency:
 
 ```sh
-docker-compose config --quiet
-docker compose up -d dashboards dashboards-setup
-docker-compose logs --tail=30 dashboards
+make dashboards
+make logs SERVICES=dashboards
 ```
 
 Open [OpenSearch Dashboards](http://localhost:5601). Set `DASHBOARDS_PORT` in `.env` to override the host port; existing configurations without it use 5601. Dashboards connects to the internal OpenSearch HTTP address, independently of `OPENSEARCH_PORT`. Both security plugins are disabled for this local demo, so no login is required. Startup can take a minute after OpenSearch is healthy.
 
-1. Wait for `dashboards-setup` to exit with code 0. Inspect its output with `docker compose logs dashboards-setup`. Normal Compose startup includes this service; for an existing stack use `docker compose up -d dashboards dashboards-setup`.
+1. Wait for `make infra` or `make dashboards` to finish successfully. These commands run setup in a disposable container and print its output directly. Normal Compose startup also includes the setup service.
 2. Open [shipments in Discover](http://localhost:5601/app/discover#/?_a=%28columns%3A!%28shipment_id%2Cversion%2Cstatus%2Cid%2Coccurred_at%29%2Cindex%3Ashipments%29). The setup service creates the pattern with a stable ID and no time filter, so the January 2025 seed timestamps remain visible. It preserves a compatible existing pattern on reruns and sets the default Discover columns to `shipment_id`, `version`, `status`, `id`, and `occurred_at`. The direct link includes those columns so an earlier browser session cannot restore the whole-document view.
 3. Once replication has written data, search `shipment_id: 1`. Expand the document and inspect `shipment_id`, `version`, `status`, `id`, and `occurred_at`. With a fresh default seed, expect shipment 1, version 3, status `delivered`, event ID 3.
 4. Use **Refresh** after indexing changes. Search visibility follows OpenSearch's refresh timing. If you opened Discover before any shipment data existed, reopen the link after the initial writes. Existing data may contain higher versions than the sample.
@@ -125,7 +120,7 @@ write time without concurrent writes or catch-up bursts. Already committed
 events remain on interruption or error. Generate requires a table created by
 seed; it starts no other services. There is no retry or restart continuation.
 
-For occasional manual events, use `docker-compose run --rm --no-deps -T source-writer append SHIPMENT_ID STATUS`. Run only one writer command at a time. Append inserts one row with maximum event ID plus one and maximum shipment version plus one, then prints it after commit. A new shipment starts at version 1. There is no transition state machine.
+For occasional manual events, use `make append ID=4001 STATUS=created`. Run only one writer command at a time. Append inserts one row with maximum event ID plus one and maximum shipment version plus one, then prints it after commit. A new shipment starts at version 1. There is no transition state machine.
 
 The seed creates only `public.shipment_status_events`:
 
@@ -148,9 +143,7 @@ For a fresh PostgreSQL-only check, run from a WSL shell at the repository root w
 ```sh
 export COMPOSE_PROJECT_NAME=issue19-seed-check
 export POSTGRES_PORT=25433
-docker-compose up -d postgres
-docker-compose exec -T postgres pg_isready -U source -d client_source
-# Wait for pg_isready to report accepting connections before continuing.
+make postgres
 make seed
 ```
 
