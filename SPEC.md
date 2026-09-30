@@ -87,12 +87,32 @@ checkpoint loss, and destination reconstruction are not covered.
 
 ### G1 verification
 
+The G1 scenario now deliberately interrupts confirmed publication before its
+checkpoint (2026-09-30). `G1_CRASH_EVENT_ID` selects a `G1PublisherService`
+subclass through Nest injection. It awaits the normal publisher, then sends
+SIGKILL to its own process for the selected ID, before returning to the caller.
+An unset or empty setting uses the normal publisher. Only the verification
+Compose file passes this setting; the harness enables it for the first run
+and clears it before recreating the replicator.
+The harness loads `G1_CRASH_EVENT_ID=2048` from `.env.verify`; an existing shell
+environment value takes precedence. It validates the ID is between 2 and 9999
+before starting Docker, so the crash leaves both saved progress and remaining work.
+The verification replicator uses Docker's init process so Node is not PID 1;
+this allows the injected self-SIGKILL to terminate it as intended.
+
 `make verify` runs `scripts/verify-g1.mjs` with Node.js 24 and Docker Compose.
 It creates a random, isolated project using `compose.verify.yaml`, with no host
 ports or shared demo volumes. It builds the applications, seeds 10,000 events,
 starts the logging consumer and replicator, and appends nine events during the
-initial load. It requires durable progress in both readers before SIGKILL, with
-the initial load demonstrably unfinished. It recreates the replicator against
+initial load. The injected publisher kills the process after RabbitMQ confirms
+the configured initial event (2048 by default). The saved initial cursor must be
+exactly one less (2047 by default), initial
+completion must be false, and all nine incremental events must be checkpointed.
+If incremental traffic has not caught up before this fixed crash point, the test
+fails; it does not claim that proof based on timing alone. Before restarting,
+the consumer must log the configured event with its full matching payload and no
+duplicate for that ID. After restarting, it must explicitly log a duplicate for that ID.
+The test recreates the replicator against
 the retained checkpoint volume, asserts the first resumed initial batch starts
 after the saved cursor, and appends nine more events after initial completion.
 It compares every source event and payload with normal consumer logs, rejects repeated normal handling, counts explicit duplicate-detection logs,

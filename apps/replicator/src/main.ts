@@ -8,6 +8,7 @@ import { ReplicationService } from './replication.service.js';
 import { readPollingOptions } from './polling-options.js';
 import { IndexerService } from './indexer.service.js';
 import { PublisherService } from './publisher.service.js';
+import { G1PublisherService } from './g1-publisher.service.js';
 import { CheckpointService } from './checkpoint.service.js';
 
 @Module({
@@ -17,7 +18,10 @@ import { CheckpointService } from './checkpoint.service.js';
     IncrementalLoadService,
     ReplicationService,
     IndexerService,
-    PublisherService,
+    {
+      provide: PublisherService,
+      useClass: process.env.G1_CRASH_EVENT_ID ? G1PublisherService : PublisherService,
+    },
     CheckpointService,
   ],
 })

@@ -29,7 +29,8 @@ services:
       RABBITMQ_DEFAULT_USER: local
       RABBITMQ_DEFAULT_PASS: g1-local
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      # Use the server account so an early probe cannot create a root-owned cookie.
+      test: ["CMD", "gosu", "rabbitmq", "rabbitmq-diagnostics", "-q", "check_running"]
       interval: 2s
       timeout: 10s
       retries: 60
@@ -42,9 +43,12 @@ services:
       PGPASSWORD: g1-local
   replicator:
     build: ./apps/replicator
+    # Node must not be PID 1: Linux otherwise ignores its self-SIGKILL.
+    init: true
     environment:
       <<: *source
       CHECKPOINT_PATH: /state/progress.sqlite
+      G1_CRASH_EVENT_ID: ${G1_CRASH_EVENT_ID:-}
       OPENSEARCH_URL: http://opensearch:9200
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_USER: local

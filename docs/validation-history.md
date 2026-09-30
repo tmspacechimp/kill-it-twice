@@ -1,5 +1,59 @@
 # Validation history
 
+## RabbitMQ startup fix and live G1 duplicate proof — 2026-09-30
+
+Reproduced the startup permission race in disposable RabbitMQ containers:
+`rabbitmq-diagnostics -q check_running` as root created a root-owned, mode-0400
+cookie that the RabbitMQ user could not read. Running the same probe through
+`gosu rabbitmq` created a cookie owned and readable by that user. Both Compose
+files now run the healthcheck as the server account. No existing data was deleted
+or permissions broadened.
+
+The first run with this fix started RabbitMQ, but the injected self-SIGKILL did
+not terminate Node as container PID 1. A disposable Node container reproduced
+this behavior. Added `init: true` to the verification replicator so Node runs
+under Docker's init process. The failed attempt was cleaned up before rerunning.
+
+`node scripts/verify-g1.mjs` then exited 0 with G1 PASS in isolated project
+`kill-it-twice-g1-8ac2f1a6-7aa1-438a-99ce-6fe8965e1986`:
+
+- Injected SIGKILL produced exit 137; saved initial cursor 999 and incremental
+  cursor 10009, with initial loading unfinished.
+- The consumer processed event 1000 before restart. The first resumed initial
+  event was 1000, and the consumer logged exactly one duplicate for that ID.
+- All 10018 source events matched exactly one normal consumer log each, and all
+  4006 latest shipment documents matched OpenSearch.
+- The resumed replicator exited 0 and project cleanup succeeded before PASS.
+
+The demo Compose configuration check and `git diff --check` also passed.
+Changes for this follow-up: `compose.yaml`, `compose.verify.yaml`, the init
+requirement in `SPEC.md`, and this validation history. Earlier edits were kept.
+
+## G1 confirmed-publication crash — 2026-09-30
+
+The existing G1 scenario now selects a publisher subclass through
+`G1_CRASH_EVENT_ID=1000`. It awaits broker confirmation, then SIGKILLs the
+replicator before returning to its checkpointing caller. Verification requires
+initial cursor 999, incremental cursor 10009, original consumer delivery before
+restart, and an explicit duplicate log for event 1000 after restart. The normal
+publisher is selected for restart. Full event and shipment comparisons remain.
+
+Commands and actual results:
+
+- `npm test --prefix apps/replicator`: formatting, lint, type checking, and
+  compilation passed; the sandbox blocked test subprocesses with `spawn EPERM`.
+- Rerun outside the sandbox with `node --test apps/replicator/test/*.test.mjs
+  scripts/verification/outcomes.test.mjs`: all 31 tests passed. Three new tests
+  cover waiting for confirmation before killing, allowing other IDs through,
+  and propagating confirmation failure without injecting a kill. The kill is
+  mocked in these unit tests; they are not evidence of a live broker duplicate.
+- `node --check` on the scenario and environment helper, and `git diff --check`:
+  passed. Compose `config --quiet` passed with the crash ID set and empty.
+- `node scripts/verify-g1.mjs`: failed during the initial image-build command
+  because the WSL Docker daemon was unavailable. Docker's journal reports a
+  conflicting PID file. Cleanup also could not connect to Docker; the scenario
+  never reached service startup. This run does not establish G1 PASS.
+
 ## Readable G1 scenario — 2026-09-30
 
 Reorganized verification into an explicit five-step scenario, Docker/data-reading

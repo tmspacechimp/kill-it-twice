@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { loadEnvFile } from 'node:process';
 import { VerificationEnvironment, waitFor } from './verification/environment.mjs';
 import {
   assertConsumerCoverage,
@@ -7,8 +8,15 @@ import {
   assertShipmentDocuments,
 } from './verification/outcomes.mjs';
 
+loadEnvFile('.env.verify');
+
 const INITIAL_SHIPMENTS = 4000;
 const INITIAL_EVENTS = 10000;
+const CRASH_EVENT_ID = Number(process.env.G1_CRASH_EVENT_ID);
+assert.ok(
+  Number.isInteger(CRASH_EVENT_ID) && CRASH_EVENT_ID > 1 && CRASH_EVENT_ID < INITIAL_EVENTS,
+  'G1_CRASH_EVENT_ID must be an integer between 2 and 9999',
+);
 const EVENTS_PER_TRAFFIC_RUN = 9;
 const FIRST_INCREMENTAL_END = INITIAL_EVENTS + EVENTS_PER_TRAFFIC_RUN;
 const TOTAL_EVENTS = INITIAL_EVENTS + 2 * EVENTS_PER_TRAFFIC_RUN;
@@ -24,19 +32,21 @@ async function verifyG1() {
   environment.startInfrastructure();
   environment.seed(INITIAL_SHIPMENTS);
   assert.equal(environment.readSourceEvents().length, INITIAL_EVENTS, 'Unexpected seed size');
-  environment.startApplications();
+  environment.startApplications(CRASH_EVENT_ID);
   await waitForReplicatorStartup();
 
-  console.log('2. Append traffic while initial loading is running, then kill the replicator.');
+  console.log(
+    `2. Append traffic and wait for the publisher to SIGKILL itself after confirming event ${CRASH_EVENT_ID}.`,
+  );
   environment.generate(EVENTS_PER_TRAFFIC_RUN);
-  const checkpointBeforeKill = await waitForBothReadersToMakeProgress();
-  environment.killReplicator();
-  assert.equal(environment.replicatorStatus().ExitCode, 137, 'Expected a SIGKILL exit');
+  await waitForInjectedCrash();
   const checkpointAfterKill = environment.readStoppedCheckpoint();
-  assertKilledMidLoad(checkpointBeforeKill, checkpointAfterKill);
+  assertKilledBeforeCheckpoint(checkpointAfterKill);
+  await waitForOriginalDelivery();
 
   console.log('3. Recreate the replicator and prove it resumes after the saved cursor.');
   environment.recreateReplicator();
+  await waitForDuplicateDelivery();
   const resumedLogs = await waitForInitialLoadToFinish();
   assertResumedFromCheckpoint(resumedLogs, checkpointAfterKill);
 
@@ -49,14 +59,19 @@ async function verifyG1() {
   assert.equal(sourceEvents.length, TOTAL_EVENTS, 'Both traffic runs must append nine events');
   const consumerOutput = await waitForConsumerDeliveries(sourceEvents.length);
   assertConsumerCoverage(sourceEvents, consumerOutput.events);
+  assert.ok(
+    consumerOutput.duplicateIds.includes(CRASH_EVENT_ID),
+    'Missing duplicate for the crash event',
+  );
   const shipments = latestShipmentEvents(sourceEvents);
   checkIndexedShipments(shipments);
 
   return {
     resumedAfter: checkpointAfterKill.initialId,
+    duplicateEventId: CRASH_EVENT_ID,
     events: sourceEvents.length,
     shipments: shipments.length,
-    duplicateDeliveries: consumerOutput.duplicateCount,
+    duplicateDeliveries: consumerOutput.duplicateIds.length,
   };
 }
 
@@ -67,31 +82,54 @@ async function waitForReplicatorStartup() {
   });
 }
 
-async function waitForBothReadersToMakeProgress() {
-  return waitFor('initial and incremental progress before SIGKILL', () => {
-    readHealthyReplicatorLogs();
-    const checkpoint = environment.readRunningCheckpoint();
-    assert.equal(checkpoint.boundary, INITIAL_EVENTS, 'Startup must capture the seeded boundary');
-    assert.equal(checkpoint.initialDone, 0, 'Initial load finished before we could kill it');
-    assert.ok(checkpoint.initialId < INITIAL_EVENTS, 'No unfinished initial rows remain');
-
-    const initialHasProgress = checkpoint.initialId !== null && checkpoint.initialId > 0;
-    const incrementalIsCaughtUp = checkpoint.incrementalId === FIRST_INCREMENTAL_END;
-    if (initialHasProgress && incrementalIsCaughtUp) return checkpoint;
-    return false;
+async function waitForInjectedCrash() {
+  await waitFor('publisher SIGKILL after broker confirmation', () => {
+    const status = environment.replicatorStatus();
+    if (status.State !== 'exited') return false;
+    assert.equal(status.ExitCode, 137, 'Expected a SIGKILL exit');
+    return true;
   });
 }
 
-function assertKilledMidLoad(beforeKill, afterKill) {
-  // Progress may advance between observing the checkpoint and delivering SIGKILL.
+function assertKilledBeforeCheckpoint(afterKill) {
   assert.equal(afterKill.boundary, INITIAL_EVENTS, 'The original boundary must be retained');
-  assert.ok(afterKill.initialId >= beforeKill.initialId, 'Committed initial progress was lost');
-  assert.ok(afterKill.initialId < INITIAL_EVENTS, 'SIGKILL arrived after initial loading ended');
+  assert.equal(
+    afterKill.initialId,
+    CRASH_EVENT_ID - 1,
+    'The confirmed crash event must not be checkpointed',
+  );
   assert.equal(afterKill.initialDone, 0, 'The killed initial load must still be unfinished');
   assert.equal(afterKill.incrementalId, FIRST_INCREMENTAL_END, 'Incremental progress was lost');
   console.log(
     `   Saved at kill: initial=${afterKill.initialId}, incremental=${afterKill.incrementalId}`,
   );
+}
+
+async function waitForOriginalDelivery() {
+  const sourceEvent = environment.readSourceEvents().find((event) => event.id === CRASH_EVENT_ID);
+  assert.ok(sourceEvent, 'Crash event is missing from the source');
+
+  await waitFor(`original consumer delivery of event ${CRASH_EVENT_ID} before restart`, () => {
+    const output = environment.readConsumerOutput();
+    const deliveries = output.events.filter((message) => message.sourceId === CRASH_EVENT_ID);
+    assert.ok(
+      !output.duplicateIds.includes(CRASH_EVENT_ID),
+      'Crash event was already duplicated before restart',
+    );
+    if (deliveries.length === 0) return false;
+    assertConsumerCoverage([sourceEvent], deliveries);
+    return true;
+  });
+  console.log(`   Consumer processed event ${CRASH_EVENT_ID} before restart.`);
+}
+
+async function waitForDuplicateDelivery() {
+  await waitFor(`consumer duplicate log for event ${CRASH_EVENT_ID}`, () => {
+    readHealthyReplicatorLogs();
+    const output = environment.readConsumerOutput();
+    return output.duplicateIds.includes(CRASH_EVENT_ID);
+  });
+  console.log(`   Consumer logged: Duplicate event received: sourceId=${CRASH_EVENT_ID}; skipping`);
 }
 
 async function waitForInitialLoadToFinish() {

@@ -13,6 +13,7 @@ const CHECKPOINT_QUERY = `
 export class VerificationEnvironment {
   constructor(projectName) {
     this.projectName = projectName;
+    this.crashEventId = '';
   }
 
   compose(...arguments_) {
@@ -20,12 +21,21 @@ export class VerificationEnvironment {
     let command = [];
     if (process.platform === 'win32') {
       executable = 'wsl.exe';
-      command = ['--cd', process.cwd(), '--exec', 'docker'];
+      // Pass the setting explicitly across the Windows/WSL boundary.
+      command = [
+        '--cd',
+        process.cwd(),
+        '--exec',
+        'env',
+        `G1_CRASH_EVENT_ID=${this.crashEventId}`,
+        'docker',
+      ];
     }
     command.push('compose', '-f', 'compose.verify.yaml', '-p', this.projectName, ...arguments_);
 
     return execFileSync(executable, command, {
       encoding: 'utf8',
+      env: { ...process.env, G1_CRASH_EVENT_ID: String(this.crashEventId) },
       maxBuffer: 32 * 1024 * 1024,
       timeout: 10 * 60 * 1000,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -52,7 +62,8 @@ export class VerificationEnvironment {
     );
   }
 
-  startApplications() {
+  startApplications(crashEventId) {
+    this.crashEventId = crashEventId;
     this.compose('up', '-d', 'consumer', 'replicator');
   }
 
@@ -71,21 +82,14 @@ export class VerificationEnvironment {
     );
   }
 
-  killReplicator() {
-    this.compose('kill', '-s', 'SIGKILL', 'replicator');
-  }
-
   recreateReplicator() {
+    this.crashEventId = '';
     // Replacing the container proves recovery uses the retained named volume.
     this.compose('up', '-d', '--force-recreate', 'replicator');
   }
 
   replicatorStatus() {
     return JSON.parse(this.compose('ps', '-a', '--format', 'json', 'replicator'));
-  }
-
-  readRunningCheckpoint() {
-    return JSON.parse(this.compose('exec', '-T', 'replicator', 'node', '-e', CHECKPOINT_QUERY));
   }
 
   readStoppedCheckpoint() {
@@ -130,16 +134,17 @@ export class VerificationEnvironment {
 
   readConsumerOutput() {
     const events = [];
-    let duplicateCount = 0;
+    const duplicateIds = [];
     const eventPrefix = 'Received event ';
     for (const line of this.logs('consumer').split('\n')) {
       if (line.startsWith(eventPrefix)) {
         events.push(JSON.parse(line.slice(eventPrefix.length)));
-      } else if (line.startsWith('Duplicate event received:')) {
-        duplicateCount++;
+      } else {
+        const duplicate = /^Duplicate event received: sourceId=(-?\d+); skipping\r?$/.exec(line);
+        if (duplicate) duplicateIds.push(Number(duplicate[1]));
       }
     }
-    return { events, duplicateCount };
+    return { events, duplicateIds };
   }
 
   readShipmentDocuments(shipmentIds) {
