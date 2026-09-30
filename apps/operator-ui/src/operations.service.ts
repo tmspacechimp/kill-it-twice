@@ -65,6 +65,7 @@ export class OperationsService {
       for (const operation of pending) {
         const update = await this.api.request<Operation>('GET', '/operations/' + operation.id);
         this.records.update((records) => replaceOperation(records, update));
+        if (update.state !== 'pending') this.message.set(`${update.action}: ${update.state}.`);
       }
       this.trackingError.set('');
     } catch (error) {

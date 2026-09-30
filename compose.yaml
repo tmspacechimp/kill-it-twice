@@ -1,4 +1,29 @@
+name: kill-it-twice
+
 services:
+  operator-api:
+    build:
+      context: ./apps/operator-api
+    environment:
+      OPERATOR_HOST: 0.0.0.0
+      OPERATOR_PORT: 3000
+      REPLICATOR_API_URL: ${REPLICATOR_API_URL:-http://replicator:3001}
+      OPERATOR_COMPOSE_PROJECT: ${COMPOSE_PROJECT_NAME}
+      OPERATOR_COMPOSE_FILE: /project/compose.yaml
+      OPERATOR_COMPOSE_DIRECTORY: /project
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/project:ro
+  operator-ui:
+    build:
+      context: ./apps/operator-ui
+    environment:
+      DASHBOARDS_PORT: ${DASHBOARDS_PORT:-5601}
+    ports:
+      - "127.0.0.1:${OPERATOR_UI_PORT:-8080}:80"
+    depends_on:
+      operator-api:
+        condition: service_started
   source-writer:
     profiles: ["seed"]
     build:

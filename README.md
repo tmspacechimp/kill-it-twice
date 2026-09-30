@@ -2,7 +2,7 @@
 
 A local shipment replication demo: a NestJS/TypeScript replicator reads PostgreSQL events, stores each shipment's latest status in OpenSearch, and publishes every event to RabbitMQ. A separate consumer logs the events.
 
-At startup, existing rows become the initial load. The replicator processes them while polling for later events concurrently. Polling waits for its first new rows without an idle limit, then stops after three consecutive empty reads by default; the process exits once initial loading also finishes. This assumes one serial source writer whose event IDs increase with commits. OpenSearch Dashboards provides shipment inspection; recovery and the assignment's operator UI are not implemented.
+At startup, existing rows become the initial load. The replicator processes them while polling for later events concurrently. Polling waits for its first new rows without an idle limit, then stops after three consecutive empty reads by default; the process exits once initial loading also finishes. This assumes one serial source writer whose event IDs increase with commits. The operator page provides source/container controls and explains unavailable gate integrations. Recovery and live gate metrics are not implemented.
 
 ## Run
 
@@ -23,6 +23,13 @@ make seed
 make up
 make logs
 ```
+
+Open [the operator page](http://localhost:8080) after `make up`. Its port is
+`OPERATOR_UI_PORT`; `make operator` starts only the page and its API. These two
+services remain available while the replicator or OpenSearch is stopped. The API
+mounts the Docker socket and project directory to control this local demo; this
+grants it access to the Docker daemon. See [operator setup](docs/operator-ui.md)
+for configuration and unfinished gate controls.
 
 `make seed` builds and runs a separate source-writer CLI against running PostgreSQL. A fresh seed creates 10,000 events for 4,000 shipments. Use `make seed SEED_ARGS="--shipments 3"` for a smaller initial fixture. Seed before starting the replicator: a missing table fails, and an empty table means zero initial rows. Reads are bounded to 1,000 rows per reader. Set `POLL_INTERVAL_MS` (default 1000) and `POLL_MAX_EMPTY` (default 3) in `.env` to control polling. Startup empty reads do not count. The empty counter becomes active after the first incremental rows arrive; later nonempty reads reset it. If no new rows ever arrive, polling stays active until stopped manually.
 

@@ -165,6 +165,6 @@ Tests use a local HTTP test double to verify routing, validation, timeouts,
 unavailable responses and forwarding. They do not establish live metric accuracy,
 resume, graceful stopping, DLQ replay, G4 outcomes or any assignment gate.
 
-#30 adds source/container commands and operations; #31 adds Angular polling and
-visible stale handling; #32 adds Compose packaging and live browser verification.
+The operator now includes source/container commands, Angular polling and Compose
+packaging. See [operator setup](operator-ui.md) and the recorded live checks.
 The parent #28 acceptance remains unfinished until gate integrations are available.

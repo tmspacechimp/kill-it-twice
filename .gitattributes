@@ -1,2 +1,4 @@
 # Match the replicator's Prettier configuration on Windows and Linux.
 apps/replicator/** text eol=lf
+apps/operator-api/** text eol=lf
+apps/operator-ui/** text eol=lf
