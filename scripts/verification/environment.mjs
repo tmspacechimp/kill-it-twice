@@ -28,6 +28,7 @@ export class VerificationEnvironment {
         '--exec',
         'env',
         `G1_CRASH_EVENT_ID=${this.crashEventId}`,
+        `SEED_SHIPMENTS=${process.env.SEED_SHIPMENTS ?? '4000'}`,
         'docker',
       ];
     }
@@ -50,16 +51,8 @@ export class VerificationEnvironment {
     this.compose('up', '-d', '--wait', 'postgres', 'opensearch', 'rabbitmq');
   }
 
-  seed(shipmentCount) {
-    this.compose(
-      'run',
-      '--rm',
-      '--no-deps',
-      '-T',
-      'source-writer',
-      '--shipments',
-      String(shipmentCount),
-    );
+  seed() {
+    this.compose('run', '--rm', '--no-deps', '-T', 'source-writer');
   }
 
   startApplications(crashEventId) {
@@ -178,7 +171,11 @@ export class VerificationEnvironment {
 
 // Waiting observes asynchronous services; it never retries failed commands or assertions.
 export async function waitFor(description, observe) {
-  const deadline = Date.now() + 10 * 60 * 1000;
+  const timeoutMs = Number(process.env.G1_WAIT_TIMEOUT_MS ?? 600000);
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new Error('G1_WAIT_TIMEOUT_MS must be a positive integer');
+  }
+  const deadline = Date.now() + timeoutMs;
   let nextProgressReport = Date.now() + 30000;
   while (Date.now() < deadline) {
     const evidence = observe();

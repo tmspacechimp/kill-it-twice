@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { loadEnvFile } from 'node:process';
+import { existsSync } from 'node:fs';
 import { VerificationEnvironment, waitFor } from './verification/environment.mjs';
 import {
   assertConsumerCoverage,
@@ -8,14 +9,21 @@ import {
   assertShipmentDocuments,
 } from './verification/outcomes.mjs';
 
+if (existsSync('.env')) loadEnvFile('.env');
 loadEnvFile('.env.verify');
 
-const INITIAL_SHIPMENTS = 4000;
-const INITIAL_EVENTS = 10000;
+const seedShipments = process.env.SEED_SHIPMENTS ?? '4000';
+const INITIAL_SHIPMENTS = Number(seedShipments);
+assert.ok(
+  /^\d+$/.test(seedShipments) && INITIAL_SHIPMENTS >= 1 && INITIAL_SHIPMENTS <= 858_993_458,
+  'SEED_SHIPMENTS must be an integer between 1 and 858993458',
+);
+// Odd shipments have three events; even shipments have two.
+const INITIAL_EVENTS = 3 * Math.ceil(INITIAL_SHIPMENTS / 2) + 2 * Math.floor(INITIAL_SHIPMENTS / 2);
 const CRASH_EVENT_ID = Number(process.env.G1_CRASH_EVENT_ID);
 assert.ok(
   Number.isInteger(CRASH_EVENT_ID) && CRASH_EVENT_ID > 1 && CRASH_EVENT_ID < INITIAL_EVENTS,
-  'G1_CRASH_EVENT_ID must be an integer between 2 and 9999',
+  `G1_CRASH_EVENT_ID must be an integer between 2 and ${INITIAL_EVENTS - 1}`,
 );
 const EVENTS_PER_TRAFFIC_RUN = 9;
 const FIRST_INCREMENTAL_END = INITIAL_EVENTS + EVENTS_PER_TRAFFIC_RUN;
@@ -26,11 +34,12 @@ const environment = new VerificationEnvironment(`kill-it-twice-g1-${randomUUID()
 // Read this function first. Helpers below contain the evidence required by each step.
 async function verifyG1() {
   console.log(`G1 project: ${environment.projectName}`);
+  console.log(`Initial fixture: ${INITIAL_SHIPMENTS} shipments, ${INITIAL_EVENTS} events`);
 
   console.log('1. Start isolated services and seed the initial dataset.');
   environment.buildApplications();
   environment.startInfrastructure();
-  environment.seed(INITIAL_SHIPMENTS);
+  environment.seed();
   assert.equal(environment.readSourceEvents().length, INITIAL_EVENTS, 'Unexpected seed size');
   environment.startApplications(CRASH_EVENT_ID);
   await waitForReplicatorStartup();

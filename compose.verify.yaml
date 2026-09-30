@@ -41,6 +41,7 @@ services:
       PGDATABASE: client_source
       PGUSER: source
       PGPASSWORD: g1-local
+      SEED_SHIPMENTS: ${SEED_SHIPMENTS-4000}
   replicator:
     build: ./apps/replicator
     # Node must not be PID 1: Linux otherwise ignores its self-SIGKILL.

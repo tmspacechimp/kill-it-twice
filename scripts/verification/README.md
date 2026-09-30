@@ -10,7 +10,7 @@ Neither helper starts a test on import.
 
 | Claim | Evidence the test requires |
 | --- | --- |
-| There was work to resume | The initial cursor is greater than zero and less than 10000, and initial completion is false, including after SIGKILL. |
+| There was work to resume | The initial cursor is greater than zero and less than the configured initial event count, and initial completion is false, including after SIGKILL. |
 | Incremental polling overlaps initial loading | All nine incremental events are checkpointed while the initial load is unfinished. |
 | The process was killed after confirmed publication | The G1 publisher awaits the normal publisher for the configured event (default 2048), then sends SIGKILL to itself. The container exits 137 and the saved initial cursor is exactly one less (default 2047). |
 | The original message reached the consumer | Before restart, the configured event has one normal consumer log with the matching source payload, and no duplicate log for that ID. |
@@ -26,7 +26,9 @@ Counts alone do not establish coverage. In particular, one repeated ID cannot
 compensate for a missing ID. Empty queue length is not used as delivery evidence.
 Timestamp normalization only reconciles PostgreSQL and JSON UTC spellings.
 
-The fixture uses 4000 shipments and 10000 contiguous event IDs. This is why the
+The fixture uses `SEED_SHIPMENTS` from the root `.env` (default 4000). Each odd
+shipment has three events and each even shipment has two, giving 10000 events
+by default. Setting 40000 yields 100000 events. Event IDs are contiguous, so the
 first resumed ID must be exactly cursor + 1. The harness holds this small fixture
 in memory for comparison; it does not change the application's bounded reads.
 OpenSearch `_mget` avoids waiting for search-index refresh.
@@ -34,11 +36,12 @@ OpenSearch `_mget` avoids waiting for search-index refresh.
 Set `G1_CRASH_EVENT_ID` in the root [`.env.verify`](../../.env.verify) file;
 it is currently `2048`. The harness loads this file, with an existing shell
 environment value taking precedence, and passes the value to Docker Compose.
-The ID must be an integer between 2 and 9999. It selects the injected publisher for the first run.
+The ID must be at least 2 and below the configured initial event count.
+It selects the injected publisher for the first run.
 The harness clears it before recreating the replicator, selecting the normal
 publisher for recovery. The fixed crash point gives incremental traffic time
 to arrive, but the saved incremental cursor is the evidence: the test fails if
-it has not reached 10009 before the crash.
+it has not reached the initial event count plus nine before the crash.
 
 ## Running it
 

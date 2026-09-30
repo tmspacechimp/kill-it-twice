@@ -1,5 +1,7 @@
 # Kill It Twice
 
+**[G1 recovery proof](G1.md): how checkpoints, the injected crash, and duplicate detection are verified.**
+
 A local shipment replication demo: a NestJS/TypeScript replicator reads PostgreSQL events, stores each shipment's latest status in OpenSearch, and publishes every event to RabbitMQ. A separate consumer logs the events.
 
 On the first startup, existing rows become the initial load. The replicator processes them while polling for later events concurrently. Durable checkpoints let later runs resume both readers. Each process waits for its first new incremental rows without an idle limit, then stops after three consecutive empty reads by default; it exits once initial loading also finishes. This assumes one serial source writer whose event IDs increase with commits and one replicator process. OpenSearch Dashboards provides shipment inspection; the assignment's operator UI is not implemented.
@@ -14,7 +16,7 @@ Create your local configuration if it does not already exist:
 make init
 ```
 
-Set `POSTGRES_PASSWORD` and `RABBITMQ_PASSWORD` in `.env`. Adjust the host ports there if the defaults are occupied. Then start and seed the system:
+Set `POSTGRES_PASSWORD` and `RABBITMQ_PASSWORD` in `.env`. Adjust the host ports there if the defaults are occupied. `SEED_SHIPMENTS` in the same file controls the initial fixture for both `make seed` and G1: 4000 gives 10,000 events; 40000 gives 100,000. The replicator discovers the boundary from the database. Then start and seed the system:
 
 ```sh
 make build

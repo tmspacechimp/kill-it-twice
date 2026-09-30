@@ -13,12 +13,12 @@ const GENERATE_USAGE = 'Usage: source-writer generate --count N --rate N';
 const APPEND_USAGE = 'Usage: source-writer append SHIPMENT_ID STATUS';
 
 export const HELP = [
-  `${SEED_USAGE} (default: ${DEFAULT_SHIPMENTS})`,
+  `${SEED_USAGE} (default: SEED_SHIPMENTS environment variable, otherwise ${DEFAULT_SHIPMENTS})`,
   GENERATE_USAGE,
   APPEND_USAGE,
 ].join('\n');
 
-export function parseCommand(args: string[]): Command {
+export function parseCommand(args: string[], seedShipments = process.env.SEED_SHIPMENTS): Command {
   if (args.length === 1 && args[0] === '--help') {
     return { name: 'help' };
   }
@@ -29,13 +29,18 @@ export function parseCommand(args: string[]): Command {
     case 'append':
       return parseAppend(args);
     default:
-      return parseSeed(args);
+      return parseSeed(args, seedShipments);
   }
 }
 
-function parseSeed(args: string[]): Command {
+function parseSeed(args: string[], seedShipments: string | undefined): Command {
   if (args.length === 0) {
-    return { name: 'seed', shipmentCount: DEFAULT_SHIPMENTS };
+    const shipmentCount =
+      seedShipments === undefined
+        ? DEFAULT_SHIPMENTS
+        : parseInteger(seedShipments, 'SEED_SHIPMENTS must be a positive integer');
+    validateShipmentCount(shipmentCount);
+    return { name: 'seed', shipmentCount };
   }
 
   if (args.length !== 2 || args[0] !== '--shipments') {

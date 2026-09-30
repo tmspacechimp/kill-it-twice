@@ -22,7 +22,7 @@ help:
 	@echo "infra       Start all infrastructure and configure Discover"
 	@echo "dashboards  Start OpenSearch/Dashboards and configure Discover"
 	@echo "up          Start replicator and consumer (or SERVICES='consumer')"
-	@echo "seed        Seed initial fixtures (optional SEED_ARGS='--shipments 3')"
+	@echo "seed        Seed SEED_SHIPMENTS from .env (optional SEED_ARGS='--shipments 3')"
 	@echo "generate    Append live events (COUNT=500 RATE=20)"
 	@echo "append      Append one status (ID=4001 STATUS=created)"
 	@echo "logs        Follow recent app logs (SERVICES='consumer' TAIL=30)"

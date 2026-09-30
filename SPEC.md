@@ -95,14 +95,16 @@ An unset or empty setting uses the normal publisher. Only the verification
 Compose file passes this setting; the harness enables it for the first run
 and clears it before recreating the replicator.
 The harness loads `G1_CRASH_EVENT_ID=2048` from `.env.verify`; an existing shell
-environment value takes precedence. It validates the ID is between 2 and 9999
+environment value takes precedence. It validates the ID is between 2 and one less
+than the configured initial event count
 before starting Docker, so the crash leaves both saved progress and remaining work.
 The verification replicator uses Docker's init process so Node is not PID 1;
 this allows the injected self-SIGKILL to terminate it as intended.
 
 `make verify` runs `scripts/verify-g1.mjs` with Node.js 24 and Docker Compose.
 It creates a random, isolated project using `compose.verify.yaml`, with no host
-ports or shared demo volumes. It builds the applications, seeds 10,000 events,
+ports or shared demo volumes. It builds the applications, seeds the configured
+fixture (10,000 events by default),
 starts the logging consumer and replicator, and appends nine events during the
 initial load. The injected publisher kills the process after RabbitMQ confirms
 the configured initial event (2048 by default). The saved initial cursor must be
@@ -118,7 +120,9 @@ after the saved cursor, and appends nine more events after initial completion.
 It compares every source event and payload with normal consumer logs, rejects repeated normal handling, counts explicit duplicate-detection logs,
 and checks every shipment's highest-version document using OpenSearch GETs.
 It reports G1 PASS only on those assertions and a successful replicator exit;
-errors or timeouts produce G1 FAIL and a nonzero exit. The isolated project and
+Errors or timeouts produce G1 FAIL and a nonzero exit. Each asynchronous
+verification stage uses `G1_WAIT_TIMEOUT_MS` (default 600000);
+larger fixtures can increase this wait without changing any assertions. The project and
 its volumes are removed in cleanup. G2–G5 are explicitly not implemented.
 
 The test is organized as a five-step scenario, with Docker operations and
@@ -146,6 +150,18 @@ PostgreSQL (client source) → replicator → OpenSearch (current records)
 NestJS/TypeScript is the intended replicator stack. Keep the consumer small; its framework is an implementation choice, not a product requirement. Specific names for the index and queue can be set during implementation and recorded here when they matter.
 
 ## Sample source data
+
+`SEED_SHIPMENTS` in the root `.env` is the shared fixture-size setting for
+`make seed` and G1. `.env.example` sets 4000; existing installations without
+the variable also default to 4000. An exported shell value takes precedence.
+The source writer reads it when no `--shipments` argument is supplied; an
+explicit argument remains a one-run override. Both Compose environments pass
+the setting to the source writer. G1 loads `.env`, derives its expected event
+count as `3 * ceil(shipments / 2) + 2 * floor(shipments / 2)`, and validates its
+crash ID against that count. Setting 40000 therefore creates 100000 events on
+a fresh source without changing test code. The replicator discovers its boundary
+from PostgreSQL and the consumer handles incoming events; neither needs a fixture
+size setting. Changing the setting does not reset existing data or checkpoints.
 
 `make seed` builds and runs the independent TypeScript source-writer CLI (issue #19) against the running Compose `postgres` service, as user `source` in database `client_source`. The service is behind the `seed` profile and is not part of normal startup. It creates only `public.shipment_status_events`, with this schema:
 

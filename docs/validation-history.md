@@ -1,5 +1,36 @@
 # Validation history
 
+## Shared seed-size environment — 2026-09-30
+
+Committed the preceding G1 work as `7574d8406f91e6ec4cde0dbb647b2dc648792878`
+before implementing this change. `SEED_SHIPMENTS` in the root `.env` now
+configures both normal seeding and G1, with 4000 as the backwards-compatible
+default. Explicit `--shipments` still overrides it for one seed command.
+G1 derives event totals and its crash-ID bounds from the shipment count.
+
+Validation:
+
+- `npm run build --prefix apps/source-writer`: passed.
+- `node --test test/*.test.mjs` from the source-writer directory: all 20 passed,
+  including environment validation, CLI precedence, and generation of 100000
+  events from 40000 shipments. The first invocation from the repository root
+  failed two existing tests that expect the package working directory; rerunning
+  from that directory passed without test changes.
+- Demo Compose's seed-profile configuration resolved `SEED_SHIPMENTS=4000`.
+- Ran `node scripts/verify-g1.mjs` with shell `SEED_SHIPMENTS=1001` and the
+  configured crash ID 2048. Project
+  `kill-it-twice-g1-1ee9d043-7327-4f83-908f-ffecc676bb9d` seeded 2503 events,
+  crashed at cursor 2047 with incremental cursor 2512, resumed at 2048, and
+  observed exactly one duplicate for 2048. All 2521 final events and 1007
+  shipment documents matched. Exit 0, G1 PASS, cleanup succeeded.
+- Syntax, formatting, and `git diff --check`: passed. The full 100000-event
+  Docker scenario was not run; the existing ten-minute wait limit still applies.
+
+Changed `.env.example`, the local ignored `.env`, both Compose files, the
+source-writer CLI and its seed configuration tests, the G1 scenario and
+environment helper, Make help, README, SPEC, the verification reading guide,
+and this history. The new seed-setting changes remain uncommitted for review.
+
 ## RabbitMQ startup fix and live G1 duplicate proof — 2026-09-30
 
 Reproduced the startup permission race in disposable RabbitMQ containers:

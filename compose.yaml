@@ -4,6 +4,7 @@ services:
     build:
       context: ./apps/source-writer
     environment:
+      SEED_SHIPMENTS: ${SEED_SHIPMENTS-4000}
       PGHOST: postgres
       PGPORT: 5432
       PGDATABASE: client_source
