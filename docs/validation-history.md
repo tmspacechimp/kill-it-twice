@@ -1,5 +1,126 @@
 # Validation history
 
+## Readable G1 scenario — 2026-09-30
+
+Reorganized verification into an explicit five-step scenario, Docker/data-reading
+helpers, and independent destination assertions. Constants name the fixture and
+traffic sizes. Assertions identify the event or shipment at fault, require exit
+137 after SIGKILL, and confirm that the first resumed event follows the saved
+cursor. PASS is printed only after project cleanup succeeds. A reading guide
+maps each recovery claim to the exact evidence and describes the test's limits.
+Application behavior and the G1 scenario's dataset and traffic are unchanged.
+
+Commands and actual results:
+
+- `node --test scripts/verification/outcomes.test.mjs`: seven passed. The checks
+  prove that missing events, duplicate IDs hiding gaps, unrelated IDs, incorrect
+  payloads, and missing or wrong shipment documents fail. They also check
+  out-of-order arrival and selection by shipment version rather than event ID.
+- `make verify NODE=node.exe`, invoked through WSL: exit 0, G1 PASS in isolated
+  project `kill-it-twice-g1-01f0d459-b5b1-4a0e-8cab-ebb54b75dd26`. At SIGKILL the
+  initial cursor was 116 and incremental cursor was 10009. The replacement's
+  first initial event was 117. All 10018 source events and 4006 latest shipment
+  documents matched. Zero duplicate-detection logs were observed. Cleanup
+  completed; no verification containers remained.
+- `node --check` on the scenario and helper modules, Prettier checks on the
+  verification JavaScript, and `git diff --check`: passed.
+
+Files changed for this request: `scripts/verify-g1.mjs`,
+`scripts/verification/environment.mjs`, `scripts/verification/outcomes.mjs`,
+`scripts/verification/outcomes.test.mjs`, `scripts/verification/README.md`,
+`README.md`, `SPEC.md`, and this validation history. Earlier work was preserved.
+
+## Consumer duplicate receipts — 2026-09-30
+
+The consumer now persists event identities in its own SQLite volume and uses
+one `INSERT ... ON CONFLICT DO NOTHING RETURNING event_id`, without a preliminary
+read. It logs new events normally and logs repeated IDs as
+`Duplicate event received: sourceId=<ID>; skipping`. Prefetch is one; manual
+acknowledgement follows receipt commit and the log call. This records durable
+acceptance, not exactly-once console output: a crash between receipt commit and
+logging can omit the normal log. Source PostgreSQL and replicator checkpoints
+remain independent of consumer receipts.
+
+Commands and actual results:
+
+- `npm test --prefix apps/consumer`: TypeScript build passed; all eight tests
+  passed. Coverage includes duplicate detection, committed receipts visible before
+  acknowledgement, reopening storage, out-of-order IDs, failed writes, lost
+  acknowledgements, logging failure, invalid identities, and corrupt storage.
+  The initial sandboxed attempt could not spawn the Node test process; the
+  permitted run succeeded.
+- `node .air/verify-consumer-duplicates.mjs`: isolated live RabbitMQ check exited
+  0 in project `consumer-dedup-6cd6b303`. Sent IDs `10001, 72, 72`, recreated the
+  consumer, then sent `72, 73`. Observed three normal logs, two duplicate logs,
+  and exactly three persisted receipts (`72, 73, 10001`). The queue had zero
+  ready and zero unacknowledged messages. Graceful shutdown exited 0. Test
+  containers and volumes were removed. The local check script and output remain
+  ignored under `.air/`.
+- `docker compose config --quiet` and
+  `docker compose -f compose.verify.yaml config --quiet`: passed.
+- `node --check scripts/verify-g1.mjs` and `git diff --check`: passed.
+
+G1's log reporting now counts explicit duplicate logs and rejects repeated normal
+handling. The full G1 scenario was not rerun for this focused consumer change;
+the earlier G1 results below describe the preceding implementation. This is not
+a G2 failure-gate claim.
+
+Files changed: `apps/consumer/src/receipt-store.ts`,
+`apps/consumer/src/handle-delivery.ts`, `apps/consumer/src/main.ts`,
+`apps/consumer/test/duplicates.test.mjs`, `apps/consumer/package.json`,
+`apps/consumer/Dockerfile`, `compose.yaml`, `compose.verify.yaml`,
+`scripts/verify-g1.mjs`, `SPEC.md`, `README.md`, `docs/development.md`, and this
+validation history. Earlier uncommitted work was preserved.
+
+## G1 checkpoint resume — 2026-09-29 (issue #27)
+
+The replicator now persists its original startup boundary, initial cursor and
+completion, and incremental cursor in a separate SQLite volume. Cursor commits
+follow successful indexing and broker confirmation. Restarts resume both readers;
+each process still waits for its first incremental rows before counting empties.
+
+Commands and actual results:
+
+- `npm test --prefix apps/replicator`: all 21 tests passed, including formatting,
+  lint, typechecking, and compilation. The new tests cover independent resumed
+  cursors, retry of interrupted work, retained initial completion, empty startup,
+  failed checkpoint writes, and corrupt-file rejection. The initial sandboxed
+  test invocation could not spawn Node subprocesses; the permitted run succeeded.
+- `wsl --cd /mnt/c/work/kill-it-twice --exec make verify NODE=node.exe`: exit 0.
+  Final isolated project `kill-it-twice-g1-7f4539c1` reported G1 PASS. SIGKILL
+  interrupted initial progress at event 71, with incremental progress at 10009.
+  The recreated container resumed at initial event 72 and preserved the original
+  boundary of 10000. Consumer payloads covered all 10018 source events, including
+  nine appended during initial loading and nine after completion. All 4006
+  highest-version shipment documents matched. Zero duplicate deliveries were
+  observed in this run; duplicates remain possible around checkpoint commits.
+  The test containers and volumes were removed successfully.
+- `docker compose config --quiet` and
+  `docker compose -f compose.verify.yaml config --quiet`: both passed.
+- `node --check scripts/verify-g1.mjs` and `git diff --check`: passed.
+
+An earlier G1 attempt hit the original three-minute harness deadline while the
+resumed load was progressing; the deadline is now ten minutes. Another attempt
+failed during RabbitMQ startup, before replication. Failure diagnostics now
+include infrastructure logs. The successful run above used the final harness.
+G2–G5 remain unimplemented; G1 is not evidence for broker-loss recovery,
+exactly-once delivery, concurrent writers, or the other failure gates.
+
+Files changed for this task:
+
+- Runtime: `apps/replicator/src/checkpoint.service.ts`,
+  `apps/replicator/src/replication.service.ts`,
+  `apps/replicator/src/initial-load.service.ts`, and
+  `apps/replicator/src/main.ts`.
+- Checks: `apps/replicator/test/checkpoint.test.mjs`,
+  `apps/replicator/test/load-test-helpers.mjs`,
+  `apps/replicator/test/README.md`, and `scripts/verify-g1.mjs`.
+- Configuration: `apps/replicator/Dockerfile`, `compose.yaml`,
+  `compose.verify.yaml`, and `Makefile`.
+- Documentation: `SPEC.md`, `AGENTS.md`, `README.md`, `docs/development.md`,
+  and this validation history. Pre-existing package and tooling edits were
+  preserved. `.air/` remains local and ignored.
+
 ## Delayed incremental startup — 2026-09-29
 
 The empty-poll limit now activates only after the first incremental rows arrive.

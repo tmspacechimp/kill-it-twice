@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := help
 
 COMPOSE ?= docker compose
+NODE ?= node
 COUNT ?= 500
 RATE ?= 20
 ID ?= 1
@@ -8,6 +9,10 @@ TAIL ?= 30
 
 .PHONY: help init build postgres infra dashboards up restart stop down logs status
 .PHONY: seed generate append history shipment counts queue check-id
+.PHONY: verify
+
+verify:
+	@$(NODE) scripts/verify-g1.mjs
 
 help:
 	@echo "Demo: make init, build, infra, seed, up; then make generate and logs"
@@ -26,6 +31,7 @@ help:
 	@echo "shipment    Show indexed current state for ID=1"
 	@echo "counts      Show source event/shipment counts and indexed count"
 	@echo "queue       Show RabbitMQ queue counts"
+	@echo "verify      Run isolated G1 kill-and-resume check (requires Node.js 24)"
 	@echo "restart     Restart replicator (or SERVICES='consumer')"
 	@echo "stop        Stop all containers (or SERVICES='replicator consumer')"
 	@echo "down        Remove containers, retaining volumes"

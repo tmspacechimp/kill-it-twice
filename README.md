@@ -2,7 +2,7 @@
 
 A local shipment replication demo: a NestJS/TypeScript replicator reads PostgreSQL events, stores each shipment's latest status in OpenSearch, and publishes every event to RabbitMQ. A separate consumer logs the events.
 
-At startup, existing rows become the initial load. The replicator processes them while polling for later events concurrently. Polling waits for its first new rows without an idle limit, then stops after three consecutive empty reads by default; the process exits once initial loading also finishes. This assumes one serial source writer whose event IDs increase with commits. OpenSearch Dashboards provides shipment inspection; recovery and the assignment's operator UI are not implemented.
+On the first startup, existing rows become the initial load. The replicator processes them while polling for later events concurrently. Durable checkpoints let later runs resume both readers. Each process waits for its first new incremental rows without an idle limit, then stops after three consecutive empty reads by default; it exits once initial loading also finishes. This assumes one serial source writer whose event IDs increase with commits and one replicator process. OpenSearch Dashboards provides shipment inspection; the assignment's operator UI is not implemented.
 
 ## Run
 
@@ -45,8 +45,8 @@ make stop SERVICES="replicator consumer"
 `make up` starts dependencies as needed but does not seed or rebuild images.
 Use `make postgres` for the source alone, or `make dashboards` for inspection
 without the applications. After a code change, build the affected app and run
-`make up SERVICES=replicator` to recreate it. `make restart` repeats the full
-replication run with the existing image and can republish events.
+`make up SERVICES=replicator` to recreate it. `make restart` resumes saved progress
+with the existing image. An interrupted event may be published again.
 
 ## Generate live traffic
 
@@ -99,7 +99,7 @@ make shipment ID=4001
 
 PostgreSQL retains both history rows; OpenSearch has one document for shipment 4001 with version 2 and status `in_transit`. If the shipment already exists, versions continue from its maximum; choose an unused positive shipment ID for this exact example. If polling has already stopped, restart the replicator to pick up these rows. Local CLI equivalent after building: `npm start --prefix apps/source-writer -- append 4001 created` with PostgreSQL environment variables set.
 
-An ID cursor can miss events with concurrent transactions that commit out of ID order. There are no durable checkpoints, retries, recovery, or consumer deduplication. This walkthrough checks the happy path, not the assignment's failure gates.
+An ID cursor can miss events with concurrent transactions that commit out of ID order. Checkpoints cover replicator interruption; automatic retries and broker-loss recovery remain unimplemented. Consumer receipts detect replayed event IDs. This walkthrough checks the happy path; use the separate G1 check below for interruption evidence.
 
 ## Inspect
 
@@ -116,7 +116,7 @@ After the sample load, shipment 1 has version 3 and status `delivered`. OpenSear
 
 Open [shipments in Discover](http://localhost:5601/app/discover#/?_a=%28columns%3A!%28shipment_id%2Cversion%2Cstatus%2Cid%2Coccurred_at%29%2Cindex%3Ashipments%29). Compose automatically creates the `shipments` index pattern without a time filter, so no manual setup or login is needed. The default table shows `shipment_id`, `version`, `status`, `id`, and `occurred_at` as columns. Search `shipment_id: 1` to inspect a sample shipment. If you override `DASHBOARDS_PORT`, use that port in the link. On first startup, wait for `make infra` to finish successfully; if the index has no documents yet, wait for replication and refresh Discover. See the [detailed walkthrough](docs/development.md#browser-inspection-with-dashboards).
 
-Run the initial load again (this republishes all events):
+Resume unfinished work and poll for later events:
 
 ```sh
 make restart
@@ -127,6 +127,52 @@ Stop the system while retaining its data:
 ```sh
 make down
 ```
+
+## Checkpoint storage and G1
+
+SQLite stores the original boundary, initial progress/completion, and incremental
+progress in the dedicated `replicator-state` Docker volume. Each event advances
+its cursor only after OpenSearch and RabbitMQ confirm success. Keep that volume
+together with the source and destinations; `make down` preserves it. A completed
+initial load is not repeated on restart. Use a fresh Compose project for a fresh
+demo. Only one replicator may use a checkpoint volume at a time.
+
+Run `make verify` with Node.js 24 installed to execute G1 in a separate, temporary
+Docker project. It kills the replicator mid-load, recreates it, checks resumed
+progress, verifies all source events against consumer logs, and compares every
+latest shipment with OpenSearch. It also appends events during and after the
+initial load. The check removes only its own containers and volumes and exits
+nonzero on failure. G2–G5 are not implemented. On Windows, the script uses Docker
+inside WSL; with Windows Node on the WSL path, use `make verify NODE=node.exe`.
+
+For local execution outside Docker, set `CHECKPOINT_PATH` to a writable SQLite
+file in an existing directory. No application state is written to PostgreSQL.
+An interruption can cause duplicate publication before the cursor commits;
+the consumer detects repeated IDs using its own durable receipts and logs duplicates explicitly.
+
+The [G1 test reading guide](scripts/verification/README.md) maps each recovery
+claim to its assertions and explains how to run the comparison checks without Docker.
+
+## Consumer duplicate detection
+
+The consumer owns a separate SQLite database in the `consumer-state` volume.
+It attempts one `INSERT ... ON CONFLICT DO NOTHING RETURNING event_id` per
+message, without a preliminary read. New IDs produce the usual `Received event`
+log; repeats produce `Duplicate event received: sourceId=72; skipping`.
+Different events for the same shipment remain distinct, regardless of arrival order.
+
+Messages are manually acknowledged after the receipt commits and the log call
+returns. Receipts survive consumer recreation and `make down`. Keep one consumer
+process per volume and retain its receipts for the lifetime of this source history.
+For local execution, set `RECEIPT_PATH` to a writable SQLite file in an existing
+directory. No consumer state is stored in source PostgreSQL or read by the replicator.
+
+A crash after receipt commit can prevent the normal log from appearing; a later
+delivery then produces a duplicate log. This is durable duplicate detection, not
+exactly-once console output. Storage or malformed-message errors stop the consumer
+without acknowledging the affected message. No automatic retries or DLQ are added.
+
+Run `npm test --prefix apps/consumer` for the focused receipt and handling tests.
 
 ## More
 

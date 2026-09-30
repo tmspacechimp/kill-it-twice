@@ -16,7 +16,11 @@ an incremental event finishes and polling stops while the initial event is
 still blocked. Only then does it release the initial reader. This checks actual
 overlap without depending on arbitrary sleep durations.
 
-Run all 18 tests, including formatting, lint, typecheck, and compilation:
+The checkpoint tests use temporary SQLite files to verify restart cursors,
+completion, failed processing and checkpoint writes, and corrupt-file rejection.
+The reader tests also use isolated temporary checkpoint files.
+
+Run all 21 tests, including formatting, lint, typecheck, and compilation:
 
 ```sh
 npm test --prefix apps/replicator
@@ -30,5 +34,6 @@ node --test apps/replicator/test/incremental.test.mjs
 ```
 
 These tests establish the specified startup boundary and finite polling flow
-with fake services. They do not establish concurrent-writer safety, recovery,
-or the assignment's failure gates.
+with fake services and real checkpoint storage. They do not establish
+concurrent-writer safety or the assignment's failure gates. `make verify` runs
+the separate G1 check against real Docker services and an actual SIGKILL.

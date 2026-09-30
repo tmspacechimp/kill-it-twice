@@ -8,6 +8,7 @@ import { ReplicationService } from './replication.service.js';
 import { readPollingOptions } from './polling-options.js';
 import { IndexerService } from './indexer.service.js';
 import { PublisherService } from './publisher.service.js';
+import { CheckpointService } from './checkpoint.service.js';
 
 @Module({
   providers: [
@@ -17,6 +18,7 @@ import { PublisherService } from './publisher.service.js';
     ReplicationService,
     IndexerService,
     PublisherService,
+    CheckpointService,
   ],
 })
 class AppModule {}

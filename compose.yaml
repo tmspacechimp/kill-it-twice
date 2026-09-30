@@ -92,6 +92,7 @@ services:
     build:
       context: ./apps/replicator
     environment:
+      CHECKPOINT_PATH: /state/progress.sqlite
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_USER: local
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
@@ -103,6 +104,8 @@ services:
       PGDATABASE: client_source
       PGUSER: source
       PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - replicator-state:/state
     depends_on:
       postgres:
         condition: service_healthy
@@ -115,14 +118,19 @@ services:
     build:
       context: ./apps/consumer
     environment:
+      RECEIPT_PATH: /state/receipts.sqlite
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_USER: local
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
+    volumes:
+      - consumer-state:/state
     depends_on:
       rabbitmq:
         condition: service_healthy
 
 volumes:
+  consumer-state:
+  replicator-state:
   postgres-data:
   opensearch-data:
   rabbitmq-data:

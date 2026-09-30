@@ -4,13 +4,13 @@ For a quick start, see the [README](../README.md). The [specification](../SPEC.m
 
 ## Current application behavior (shipments)
 
-The replicator reads the maximum event ID once at startup. Existing rows through that boundary form the initial load. A separate read-only connection immediately polls for greater IDs while initial loading is in progress. Both readers use batches of at most 1,000, ordered by ID. An empty table means zero initial rows; a missing table fails with instructions to seed first. The single serial, append-only writer assumption makes the ID boundary valid without a long-lived snapshot transaction.
+The replicator reads the maximum event ID on its first startup and persists that boundary. Restarts reuse the boundary and resume the saved initial and incremental cursors. Existing rows through that boundary form the initial load. A separate read-only connection immediately polls for greater IDs while initial loading is in progress. Both readers use batches of at most 1,000, ordered by ID. An empty table means zero initial rows; a missing table fails with instructions to seed first. The single serial, append-only writer assumption makes the ID boundary valid without a long-lived snapshot transaction.
 
 For each row, each reader awaits a versioned PUT to `shipments/_doc/<shipment ID>` in OpenSearch, then publishes a JSON event to RabbitMQ queue `shipments.initial-load` and awaits broker confirmation. Every event is published, including older or replayed versions. Only a higher shipment version replaces the OpenSearch document; recognized version conflicts continue to publication, while other errors stop processing. Both destinations contain all five event fields; timestamps use ISO UTC strings. The readers can interleave events, so consumer logs need not be in event-ID or shipment-version order.
 
 Polling waits indefinitely for the first incremental rows; startup empty reads do not count. After the first nonempty incremental batch, polling stops after `POLL_MAX_EMPTY` consecutive empty reads (default 3); any later nonempty batch resets the counter. Full batches drain immediately; empty or partial batches wait `POLL_INTERVAL_MS` (default 1000), except after the final empty read. The first poll is immediate. If no incremental rows arrive, polling stays alive until shutdown or error, even after initial loading finishes. Polling may stop before initial loading finishes, and does not restart automatically. The process exits after both readers finish. SIGINT/SIGTERM stop between records and interrupt waits; failures cancel the sibling reader before cleanup.
 
-The independent plain TypeScript consumer connects only to RabbitMQ and logs each complete event. It stays subscribed after the replicator exits. Events look like this (illustrative shape):
+The independent plain TypeScript consumer connects to RabbitMQ and owns a separate SQLite receipt database. It logs each new event in full and logs `Duplicate event received: sourceId=<ID>; skipping` for repeated IDs. It manually acknowledges after the receipt commits and the log call returns. It stays subscribed after the replicator exits. Events look like this (illustrative shape):
 
 ```json
 {"type":"shipment.status","sourceId":3,"record":{"id":3,"shipment_id":1,"version":3,"status":"delivered","occurred_at":"2025-01-01T00:03:00.000Z"}}
@@ -81,9 +81,9 @@ Inspect the queue independently:
 make queue
 ```
 
-An empty queue while the consumer is running is not proof that every event was logged. To observe queued publications manually, use `make stop SERVICES=consumer`, then `make restart`. Wait for `Initial load complete`, inspect with `make queue`, then run `make up SERVICES=consumer`. The replicator still waits for incremental traffic; initial completion alone does not stop it. Rerunning the replicator republishes the snapshot.
+An empty queue while the consumer is running is not proof that every event was logged. To observe queued publications, stop the consumer, restart the replicator, and run `make generate`. Inspect with `make queue`, then start the consumer. Restarting resumes saved progress rather than republishing the snapshot.
 
-After both initial loading and polling complete, expect the replicator to exit with code 0 while the consumer remains running. To observe live generation manually, run `make generate COUNT=500 RATE=20` in another terminal when ready; startup polling waits for this first activity; see [live traffic generation](../README.md#generate-live-traffic). New rows after polling stops need another run. Run a fresh full load with `make restart`, which can republish duplicates. To stop and remove containers while retaining data, use `make down`. No walkthrough step requires deleting existing volumes.
+After both initial loading and polling complete, expect the replicator to exit with code 0 while the consumer remains running. To observe live generation manually, run `make generate COUNT=500 RATE=20` in another terminal when ready; startup polling waits for this first activity; see [live traffic generation](../README.md#generate-live-traffic). New rows after polling stops need another run. Resume unfinished work with `make restart`; an event interrupted before checkpoint commit can be republished. To stop and remove containers while retaining data, use `make down`. No walkthrough step requires deleting existing volumes.
 
 A clean-source walkthrough needs unused volumes. Use a new `COMPOSE_PROJECT_NAME` and unused host ports, consistently for Compose and `make seed`, to preserve existing data. Application image tags remain shared.
 
@@ -163,7 +163,7 @@ Use Node.js 24 and npm:
 npm ci --prefix apps/replicator
 npm test --prefix apps/replicator
 npm ci --prefix apps/consumer
-npm run build --prefix apps/consumer
+npm test --prefix apps/consumer
 npm ci --prefix apps/source-writer
 npm test --prefix apps/source-writer
 ```
@@ -174,7 +174,7 @@ See the [test reading guide](../apps/replicator/test/README.md) for scenarios an
 
 The replicator tests compile TypeScript and use mocked clients to inspect bounded reads, waiting, cleanup, destination errors, JSON fields, and publication confirmation. They are not automated pipeline or failure-gate checks.
 
-For local execution, set the five standard PostgreSQL variables (`PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`), `OPENSEARCH_URL`, and `RABBITMQ_HOST`, `RABBITMQ_PORT`, `RABBITMQ_USER`, `RABBITMQ_PASSWORD`. Use published host ports. The consumer needs only the RabbitMQ variables. Neither application loads `.env` itself.
+For local execution, set `CHECKPOINT_PATH` to a writable SQLite file in an existing directory, then set the five standard PostgreSQL variables (`PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`), `OPENSEARCH_URL`, and `RABBITMQ_HOST`, `RABBITMQ_PORT`, `RABBITMQ_USER`, `RABBITMQ_PASSWORD`. Use published host ports. The consumer needs the RabbitMQ variables and `RECEIPT_PATH`, pointing to a writable SQLite file in an existing directory. Neither application loads `.env` itself.
 
 ```sh
 npm start --prefix apps/replicator
@@ -187,8 +187,8 @@ All application Dockerfiles compile TypeScript and ship runtime dependencies as 
 
 ## Limitations
 
-This is a concurrent initial-load and finite-polling POC, not a throughput benchmark. Correct discovery assumes one serial writer whose IDs increase with commits; concurrent transactions committing out of ID order can be missed. After receiving its first incremental rows, polling stops permanently for this run after consecutive empty reads, even if initial loading is still active. Restarting loads the full current dataset again, retains the highest shipment versions, and can emit duplicate events. Stale destination documents are not deleted.
+This is a concurrent initial-load and finite-polling POC, not a throughput benchmark. Correct discovery assumes one serial writer whose IDs increase with commits; concurrent transactions committing out of ID order can be missed. After receiving its first incremental rows, polling stops permanently for this run after consecutive empty reads, even if initial loading is still active. Restarting resumes saved cursors, retains the highest shipment versions, and can emit duplicates for events interrupted before checkpoint commit. Stale destination documents are not deleted.
 
-Indexing and publication are separate operations. The queue and events are non-durable/non-persistent; the consumer uses automatic acknowledgement, so an event may be lost before logging. Broker confirmation is not evidence of consumer logging or atomic delivery to both destinations.
+Indexing and publication are separate operations. The queue and events are non-durable/non-persistent; the consumer uses manual acknowledgement and persistent receipt checks. A crash between receipt commit and console output can still omit a normal log. Broker confirmation is not evidence of consumer logging or atomic delivery to both destinations.
 
-There is no durable checkpoint, retry/reconnect policy, DLQ, receipt storage, operator UI, recovery mechanism, or failure-gate claim. Polling and infrastructure health checks are not delivery guarantees. No `make verify` or automated outcome gate is provided.
+Durable SQLite checkpoints live in the dedicated `replicator-state` volume, separate from PostgreSQL. One replicator process owns that volume. `make verify` runs the isolated G1 interruption check described in the README; G2–G5 remain unimplemented. The consumer owns separate receipts in `consumer-state`, using one conflict-aware insert per event; it never shares the replicator checkpoint. There is no automatic retry/reconnect policy, DLQ, or operator UI. Polling and infrastructure health checks are not delivery guarantees.

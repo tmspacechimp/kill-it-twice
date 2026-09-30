@@ -4,6 +4,10 @@ import { ShipmentSourceService } from '../dist/shipment-source.service.js';
 import { InitialLoadService } from '../dist/initial-load.service.js';
 import { IncrementalLoadService } from '../dist/incremental-load.service.js';
 import { ReplicationService } from '../dist/replication.service.js';
+import { CheckpointService } from '../dist/checkpoint.service.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 export function eventsFrom(firstId, count) {
   return Array.from({ length: count }, (_, offset) => ({ id: firstId + offset }));
@@ -17,8 +21,13 @@ export function setupLoad(
     pollingReads = [[], [], []],
     connectionError,
     onLog = () => {},
+    checkpointPath,
   } = {},
 ) {
+  const directory = mkdtempSync(join(tmpdir(), 'replicator-test-'));
+  t.after(() => {
+    rmSync(directory, { recursive: true, force: true });
+  });
   const database = { reads: [], closed: [], connections: [], boundaryReads: 0 };
   const readers = new Map();
   const pendingInitial = [...initialReads];
@@ -60,10 +69,16 @@ export function setupLoad(
   });
 
   const source = new ShipmentSourceService();
+  const checkpoint = new CheckpointService();
+  const openCheckpoint = checkpoint.open.bind(checkpoint);
+  t.mock.method(checkpoint, 'open', (readBoundary) =>
+    openCheckpoint(readBoundary, checkpointPath ?? join(directory, 'progress.sqlite')),
+  );
   const loader = new ReplicationService(
     source,
     new InitialLoadService(source),
     new IncrementalLoadService(source),
+    checkpoint,
   );
 
   async function run(processRecord = async () => {}, options = {}) {
