@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := help
 
 COMPOSE ?= docker compose
+NODE ?= node
 COUNT ?= 500
 RATE ?= 20
 ID ?= 1
@@ -8,6 +9,10 @@ TAIL ?= 30
 
 .PHONY: help init build postgres infra dashboards up restart stop down logs status
 .PHONY: seed generate append history shipment counts queue check-id
+.PHONY: verify
+
+verify:
+	@$(NODE) scripts/verify-g1.mjs
 
 help:
 	@echo "Demo: make init, build, infra, seed, up; then make generate and logs"
@@ -17,7 +22,7 @@ help:
 	@echo "infra       Start all infrastructure and configure Discover"
 	@echo "dashboards  Start OpenSearch/Dashboards and configure Discover"
 	@echo "up          Start replicator and consumer (or SERVICES='consumer')"
-	@echo "seed        Seed initial fixtures (optional SEED_ARGS='--shipments 3')"
+	@echo "seed        Seed SEED_SHIPMENTS from .env (optional SEED_ARGS='--shipments 3')"
 	@echo "generate    Append live events (COUNT=500 RATE=20)"
 	@echo "append      Append one status (ID=4001 STATUS=created)"
 	@echo "logs        Follow recent app logs (SERVICES='consumer' TAIL=30)"
@@ -26,6 +31,7 @@ help:
 	@echo "shipment    Show indexed current state for ID=1"
 	@echo "counts      Show source event/shipment counts and indexed count"
 	@echo "queue       Show RabbitMQ queue counts"
+	@echo "verify      Run isolated G1 kill-and-resume check (requires Node.js 24)"
 	@echo "restart     Restart replicator (or SERVICES='consumer')"
 	@echo "stop        Stop all containers (or SERVICES='replicator consumer')"
 	@echo "down        Remove containers, retaining volumes"

@@ -12,8 +12,8 @@ export class InitialLoadService {
     boundary: number | null,
     processRecord: ProcessRecord,
     signal: AbortSignal,
+    lastId: number | null = null,
   ): Promise<void> {
-    let lastId: number | null = null;
     let rows = 0;
     let batches = 0;
 

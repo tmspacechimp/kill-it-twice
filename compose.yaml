@@ -4,6 +4,7 @@ services:
     build:
       context: ./apps/source-writer
     environment:
+      SEED_SHIPMENTS: ${SEED_SHIPMENTS-4000}
       PGHOST: postgres
       PGPORT: 5432
       PGDATABASE: client_source
@@ -82,7 +83,8 @@ services:
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      # Use the server account so an early probe cannot create a root-owned cookie.
+      test: ["CMD", "gosu", "rabbitmq", "rabbitmq-diagnostics", "-q", "check_running"]
       interval: ${DEFAULT_HEALTHCHECK_INTERVAL}
       timeout: ${DEFAULT_HEALTHCHECK_TIMEOUT}
       retries: ${DEFAULT_HEALTHCHECK_RETRIES}
@@ -92,6 +94,7 @@ services:
     build:
       context: ./apps/replicator
     environment:
+      CHECKPOINT_PATH: /state/progress.sqlite
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_USER: local
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
@@ -103,6 +106,8 @@ services:
       PGDATABASE: client_source
       PGUSER: source
       PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - replicator-state:/state
     depends_on:
       postgres:
         condition: service_healthy
@@ -115,14 +120,19 @@ services:
     build:
       context: ./apps/consumer
     environment:
+      RECEIPT_PATH: /state/receipts.sqlite
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_USER: local
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
+    volumes:
+      - consumer-state:/state
     depends_on:
       rabbitmq:
         condition: service_healthy
 
 volumes:
+  consumer-state:
+  replicator-state:
   postgres-data:
   opensearch-data:
   rabbitmq-data:

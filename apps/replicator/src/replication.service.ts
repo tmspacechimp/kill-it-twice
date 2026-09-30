@@ -4,6 +4,7 @@ import { InitialLoadService } from './initial-load.service.js';
 import { IncrementalLoadService } from './incremental-load.service.js';
 import type { ProcessRecord } from './shipment-event.js';
 import type { PollingOptions } from './polling-options.js';
+import { CheckpointService, type Checkpoint } from './checkpoint.service.js';
 
 @Injectable()
 export class ReplicationService {
@@ -13,6 +14,7 @@ export class ReplicationService {
     private readonly source: ShipmentSourceService,
     private readonly initialLoad: InitialLoadService,
     private readonly incrementalLoad: IncrementalLoadService,
+    private readonly checkpoint: CheckpointService,
   ) {}
 
   async run(
@@ -24,17 +26,24 @@ export class ReplicationService {
       await this.source.connect();
       signal.throwIfAborted();
 
-      const boundary = await this.source.readStartupBoundary();
-      this.logger.log(`Startup boundary: lastId=${boundary ?? 'none'}`);
+      const saved = await this.checkpoint.open(() => this.source.readStartupBoundary());
+      this.logger.log(`Startup boundary: lastId=${saved.boundary ?? 'none'}`);
+      this.logger.log(
+        `Saved progress: initialId=${saved.initialId ?? 'none'} initialDone=${saved.initialDone} incrementalId=${saved.incrementalId ?? 'none'}`,
+      );
 
-      await this.runBothLoads(boundary, processRecord, options, signal);
+      await this.runBothLoads(saved, processRecord, options, signal);
     } finally {
-      await this.source.close();
+      try {
+        await this.source.close();
+      } finally {
+        this.checkpoint.close();
+      }
     }
   }
 
   private async runBothLoads(
-    boundary: number | null,
+    saved: Checkpoint,
     processRecord: ProcessRecord,
     options: PollingOptions,
     shutdownSignal: AbortSignal,
@@ -42,8 +51,16 @@ export class ReplicationService {
     const failure = new AbortController();
     const signal = AbortSignal.any([shutdownSignal, failure.signal]);
     const loads = [
-      this.initialLoad.run(boundary, processRecord, signal),
-      this.incrementalLoad.run(boundary, processRecord, options, signal),
+      this.resumeInitial(saved, processRecord, signal),
+      this.incrementalLoad.run(
+        saved.incrementalId,
+        async (event) => {
+          await processRecord(event);
+          this.checkpoint.advanceIncremental(event.id);
+        },
+        options,
+        signal,
+      ),
     ];
 
     try {
@@ -54,5 +71,27 @@ export class ReplicationService {
       await Promise.allSettled(loads);
       throw error;
     }
+  }
+
+  private async resumeInitial(
+    saved: Checkpoint,
+    processRecord: ProcessRecord,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (saved.initialDone) {
+      this.logger.log('Initial load already complete; resuming incremental polling only');
+      return;
+    }
+
+    await this.initialLoad.run(
+      saved.boundary,
+      async (event) => {
+        await processRecord(event);
+        this.checkpoint.advanceInitial(event.id);
+      },
+      signal,
+      saved.initialId,
+    );
+    this.checkpoint.finishInitial();
   }
 }

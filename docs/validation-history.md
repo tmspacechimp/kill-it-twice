@@ -1,5 +1,211 @@
 # Validation history
 
+## Shared seed-size environment — 2026-09-30
+
+Committed the preceding G1 work as `7574d8406f91e6ec4cde0dbb647b2dc648792878`
+before implementing this change. `SEED_SHIPMENTS` in the root `.env` now
+configures both normal seeding and G1, with 4000 as the backwards-compatible
+default. Explicit `--shipments` still overrides it for one seed command.
+G1 derives event totals and its crash-ID bounds from the shipment count.
+
+Validation:
+
+- `npm run build --prefix apps/source-writer`: passed.
+- `node --test test/*.test.mjs` from the source-writer directory: all 20 passed,
+  including environment validation, CLI precedence, and generation of 100000
+  events from 40000 shipments. The first invocation from the repository root
+  failed two existing tests that expect the package working directory; rerunning
+  from that directory passed without test changes.
+- Demo Compose's seed-profile configuration resolved `SEED_SHIPMENTS=4000`.
+- Ran `node scripts/verify-g1.mjs` with shell `SEED_SHIPMENTS=1001` and the
+  configured crash ID 2048. Project
+  `kill-it-twice-g1-1ee9d043-7327-4f83-908f-ffecc676bb9d` seeded 2503 events,
+  crashed at cursor 2047 with incremental cursor 2512, resumed at 2048, and
+  observed exactly one duplicate for 2048. All 2521 final events and 1007
+  shipment documents matched. Exit 0, G1 PASS, cleanup succeeded.
+- Syntax, formatting, and `git diff --check`: passed. The full 100000-event
+  Docker scenario was not run; the existing ten-minute wait limit still applies.
+
+Changed `.env.example`, the local ignored `.env`, both Compose files, the
+source-writer CLI and its seed configuration tests, the G1 scenario and
+environment helper, Make help, README, SPEC, the verification reading guide,
+and this history. The new seed-setting changes remain uncommitted for review.
+
+## RabbitMQ startup fix and live G1 duplicate proof — 2026-09-30
+
+Reproduced the startup permission race in disposable RabbitMQ containers:
+`rabbitmq-diagnostics -q check_running` as root created a root-owned, mode-0400
+cookie that the RabbitMQ user could not read. Running the same probe through
+`gosu rabbitmq` created a cookie owned and readable by that user. Both Compose
+files now run the healthcheck as the server account. No existing data was deleted
+or permissions broadened.
+
+The first run with this fix started RabbitMQ, but the injected self-SIGKILL did
+not terminate Node as container PID 1. A disposable Node container reproduced
+this behavior. Added `init: true` to the verification replicator so Node runs
+under Docker's init process. The failed attempt was cleaned up before rerunning.
+
+`node scripts/verify-g1.mjs` then exited 0 with G1 PASS in isolated project
+`kill-it-twice-g1-8ac2f1a6-7aa1-438a-99ce-6fe8965e1986`:
+
+- Injected SIGKILL produced exit 137; saved initial cursor 999 and incremental
+  cursor 10009, with initial loading unfinished.
+- The consumer processed event 1000 before restart. The first resumed initial
+  event was 1000, and the consumer logged exactly one duplicate for that ID.
+- All 10018 source events matched exactly one normal consumer log each, and all
+  4006 latest shipment documents matched OpenSearch.
+- The resumed replicator exited 0 and project cleanup succeeded before PASS.
+
+The demo Compose configuration check and `git diff --check` also passed.
+Changes for this follow-up: `compose.yaml`, `compose.verify.yaml`, the init
+requirement in `SPEC.md`, and this validation history. Earlier edits were kept.
+
+## G1 confirmed-publication crash — 2026-09-30
+
+The existing G1 scenario now selects a publisher subclass through
+`G1_CRASH_EVENT_ID=1000`. It awaits broker confirmation, then SIGKILLs the
+replicator before returning to its checkpointing caller. Verification requires
+initial cursor 999, incremental cursor 10009, original consumer delivery before
+restart, and an explicit duplicate log for event 1000 after restart. The normal
+publisher is selected for restart. Full event and shipment comparisons remain.
+
+Commands and actual results:
+
+- `npm test --prefix apps/replicator`: formatting, lint, type checking, and
+  compilation passed; the sandbox blocked test subprocesses with `spawn EPERM`.
+- Rerun outside the sandbox with `node --test apps/replicator/test/*.test.mjs
+  scripts/verification/outcomes.test.mjs`: all 31 tests passed. Three new tests
+  cover waiting for confirmation before killing, allowing other IDs through,
+  and propagating confirmation failure without injecting a kill. The kill is
+  mocked in these unit tests; they are not evidence of a live broker duplicate.
+- `node --check` on the scenario and environment helper, and `git diff --check`:
+  passed. Compose `config --quiet` passed with the crash ID set and empty.
+- `node scripts/verify-g1.mjs`: failed during the initial image-build command
+  because the WSL Docker daemon was unavailable. Docker's journal reports a
+  conflicting PID file. Cleanup also could not connect to Docker; the scenario
+  never reached service startup. This run does not establish G1 PASS.
+
+## Readable G1 scenario — 2026-09-30
+
+Reorganized verification into an explicit five-step scenario, Docker/data-reading
+helpers, and independent destination assertions. Constants name the fixture and
+traffic sizes. Assertions identify the event or shipment at fault, require exit
+137 after SIGKILL, and confirm that the first resumed event follows the saved
+cursor. PASS is printed only after project cleanup succeeds. A reading guide
+maps each recovery claim to the exact evidence and describes the test's limits.
+Application behavior and the G1 scenario's dataset and traffic are unchanged.
+
+Commands and actual results:
+
+- `node --test scripts/verification/outcomes.test.mjs`: seven passed. The checks
+  prove that missing events, duplicate IDs hiding gaps, unrelated IDs, incorrect
+  payloads, and missing or wrong shipment documents fail. They also check
+  out-of-order arrival and selection by shipment version rather than event ID.
+- `make verify NODE=node.exe`, invoked through WSL: exit 0, G1 PASS in isolated
+  project `kill-it-twice-g1-01f0d459-b5b1-4a0e-8cab-ebb54b75dd26`. At SIGKILL the
+  initial cursor was 116 and incremental cursor was 10009. The replacement's
+  first initial event was 117. All 10018 source events and 4006 latest shipment
+  documents matched. Zero duplicate-detection logs were observed. Cleanup
+  completed; no verification containers remained.
+- `node --check` on the scenario and helper modules, Prettier checks on the
+  verification JavaScript, and `git diff --check`: passed.
+
+Files changed for this request: `scripts/verify-g1.mjs`,
+`scripts/verification/environment.mjs`, `scripts/verification/outcomes.mjs`,
+`scripts/verification/outcomes.test.mjs`, `scripts/verification/README.md`,
+`README.md`, `SPEC.md`, and this validation history. Earlier work was preserved.
+
+## Consumer duplicate receipts — 2026-09-30
+
+The consumer now persists event identities in its own SQLite volume and uses
+one `INSERT ... ON CONFLICT DO NOTHING RETURNING event_id`, without a preliminary
+read. It logs new events normally and logs repeated IDs as
+`Duplicate event received: sourceId=<ID>; skipping`. Prefetch is one; manual
+acknowledgement follows receipt commit and the log call. This records durable
+acceptance, not exactly-once console output: a crash between receipt commit and
+logging can omit the normal log. Source PostgreSQL and replicator checkpoints
+remain independent of consumer receipts.
+
+Commands and actual results:
+
+- `npm test --prefix apps/consumer`: TypeScript build passed; all eight tests
+  passed. Coverage includes duplicate detection, committed receipts visible before
+  acknowledgement, reopening storage, out-of-order IDs, failed writes, lost
+  acknowledgements, logging failure, invalid identities, and corrupt storage.
+  The initial sandboxed attempt could not spawn the Node test process; the
+  permitted run succeeded.
+- `node .air/verify-consumer-duplicates.mjs`: isolated live RabbitMQ check exited
+  0 in project `consumer-dedup-6cd6b303`. Sent IDs `10001, 72, 72`, recreated the
+  consumer, then sent `72, 73`. Observed three normal logs, two duplicate logs,
+  and exactly three persisted receipts (`72, 73, 10001`). The queue had zero
+  ready and zero unacknowledged messages. Graceful shutdown exited 0. Test
+  containers and volumes were removed. The local check script and output remain
+  ignored under `.air/`.
+- `docker compose config --quiet` and
+  `docker compose -f compose.verify.yaml config --quiet`: passed.
+- `node --check scripts/verify-g1.mjs` and `git diff --check`: passed.
+
+G1's log reporting now counts explicit duplicate logs and rejects repeated normal
+handling. The full G1 scenario was not rerun for this focused consumer change;
+the earlier G1 results below describe the preceding implementation. This is not
+a G2 failure-gate claim.
+
+Files changed: `apps/consumer/src/receipt-store.ts`,
+`apps/consumer/src/handle-delivery.ts`, `apps/consumer/src/main.ts`,
+`apps/consumer/test/duplicates.test.mjs`, `apps/consumer/package.json`,
+`apps/consumer/Dockerfile`, `compose.yaml`, `compose.verify.yaml`,
+`scripts/verify-g1.mjs`, `SPEC.md`, `README.md`, `docs/development.md`, and this
+validation history. Earlier uncommitted work was preserved.
+
+## G1 checkpoint resume — 2026-09-29 (issue #27)
+
+The replicator now persists its original startup boundary, initial cursor and
+completion, and incremental cursor in a separate SQLite volume. Cursor commits
+follow successful indexing and broker confirmation. Restarts resume both readers;
+each process still waits for its first incremental rows before counting empties.
+
+Commands and actual results:
+
+- `npm test --prefix apps/replicator`: all 21 tests passed, including formatting,
+  lint, typechecking, and compilation. The new tests cover independent resumed
+  cursors, retry of interrupted work, retained initial completion, empty startup,
+  failed checkpoint writes, and corrupt-file rejection. The initial sandboxed
+  test invocation could not spawn Node subprocesses; the permitted run succeeded.
+- `wsl --cd /mnt/c/work/kill-it-twice --exec make verify NODE=node.exe`: exit 0.
+  Final isolated project `kill-it-twice-g1-7f4539c1` reported G1 PASS. SIGKILL
+  interrupted initial progress at event 71, with incremental progress at 10009.
+  The recreated container resumed at initial event 72 and preserved the original
+  boundary of 10000. Consumer payloads covered all 10018 source events, including
+  nine appended during initial loading and nine after completion. All 4006
+  highest-version shipment documents matched. Zero duplicate deliveries were
+  observed in this run; duplicates remain possible around checkpoint commits.
+  The test containers and volumes were removed successfully.
+- `docker compose config --quiet` and
+  `docker compose -f compose.verify.yaml config --quiet`: both passed.
+- `node --check scripts/verify-g1.mjs` and `git diff --check`: passed.
+
+An earlier G1 attempt hit the original three-minute harness deadline while the
+resumed load was progressing; the deadline is now ten minutes. Another attempt
+failed during RabbitMQ startup, before replication. Failure diagnostics now
+include infrastructure logs. The successful run above used the final harness.
+G2–G5 remain unimplemented; G1 is not evidence for broker-loss recovery,
+exactly-once delivery, concurrent writers, or the other failure gates.
+
+Files changed for this task:
+
+- Runtime: `apps/replicator/src/checkpoint.service.ts`,
+  `apps/replicator/src/replication.service.ts`,
+  `apps/replicator/src/initial-load.service.ts`, and
+  `apps/replicator/src/main.ts`.
+- Checks: `apps/replicator/test/checkpoint.test.mjs`,
+  `apps/replicator/test/load-test-helpers.mjs`,
+  `apps/replicator/test/README.md`, and `scripts/verify-g1.mjs`.
+- Configuration: `apps/replicator/Dockerfile`, `compose.yaml`,
+  `compose.verify.yaml`, and `Makefile`.
+- Documentation: `SPEC.md`, `AGENTS.md`, `README.md`, `docs/development.md`,
+  and this validation history. Pre-existing package and tooling edits were
+  preserved. `.air/` remains local and ignored.
+
 ## Delayed incremental startup — 2026-09-29
 
 The empty-poll limit now activates only after the first incremental rows arrive.

@@ -1,0 +1,72 @@
+# Standalone G1 environment: no host ports, shared image tags, or demo volumes.
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: client_source
+      POSTGRES_USER: source
+      POSTGRES_PASSWORD: g1-local
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U source -d client_source"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+  opensearch:
+    image: opensearchproject/opensearch:3.4.0
+    environment:
+      discovery.type: single-node
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      DISABLE_SECURITY_PLUGIN: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s'"]
+      interval: 2s
+      timeout: 10s
+      retries: 90
+  rabbitmq:
+    image: rabbitmq:4.1-management
+    environment:
+      RABBITMQ_DEFAULT_USER: local
+      RABBITMQ_DEFAULT_PASS: g1-local
+    healthcheck:
+      # Use the server account so an early probe cannot create a root-owned cookie.
+      test: ["CMD", "gosu", "rabbitmq", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 2s
+      timeout: 10s
+      retries: 60
+  source-writer:
+    build: ./apps/source-writer
+    environment: &source
+      PGHOST: postgres
+      PGDATABASE: client_source
+      PGUSER: source
+      PGPASSWORD: g1-local
+      SEED_SHIPMENTS: ${SEED_SHIPMENTS-4000}
+  replicator:
+    build: ./apps/replicator
+    # Node must not be PID 1: Linux otherwise ignores its self-SIGKILL.
+    init: true
+    environment:
+      <<: *source
+      CHECKPOINT_PATH: /state/progress.sqlite
+      G1_CRASH_EVENT_ID: ${G1_CRASH_EVENT_ID:-}
+      OPENSEARCH_URL: http://opensearch:9200
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: local
+      RABBITMQ_PASSWORD: g1-local
+      POLL_INTERVAL_MS: 1000
+      POLL_MAX_EMPTY: 3
+    volumes:
+      - state:/state
+  consumer:
+    build: ./apps/consumer
+    environment:
+      RECEIPT_PATH: /state/receipts.sqlite
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: local
+      RABBITMQ_PASSWORD: g1-local
+    volumes:
+      - consumer-state:/state
+volumes:
+  consumer-state:
+  state:
