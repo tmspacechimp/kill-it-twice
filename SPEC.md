@@ -166,8 +166,23 @@ HTTP 409. Graceful replication/configuration calls share the replicator lock,
 replay shares replicator/OpenSearch locks, and G4 shares all three. No gate behavior
 is implemented here. Docker packaging follows in #32.
 
+## Operator page (issue #31)
+
+The Angular operator is one page with status, controls, DLQ and simulation panels.
+It uses only relative `/api` requests, with a development proxy to the operator API.
+Status polls every two seconds, skips ticks while a request is active, and times
+out requests after two seconds. Last successful values and timestamps survive
+errors only with a visible stale marker. Missing measurements remain unavailable.
+Supported configuration and DLQ pages are fetched on demand; only advertised
+settings appear. Gate controls are disabled when no current status is available.
+
+Source and container commands are tracked through their operation IDs. Related
+controls stay disabled until a confirmed outcome; lost operation status leaves
+pending controls disabled and displays a tracking error. The page makes no health
+or resume claim from a completed Docker command. Docker integration follows in #32.
+
 ## Boundaries and future work
 
-This v0.5 makes no claim about recovery, complete delivery, duplicates, concurrent updates, or behavior when a destination fails. It has no checkpoints, retry policy, DLQ, observability UI, or `make verify`. Do not describe the visible happy path as proof of any failure gate.
+This v0.5 makes no claim about recovery, complete delivery, duplicates, concurrent updates, or behavior when a destination fails. It has no checkpoints, retry policy, DLQ mechanism, live gate metrics, or `make verify`. The operator page exposes available integrations and explains missing ones. Do not describe the visible happy path as proof of any failure gate.
 
 Later versions must decide how source changes are captured; how progress and delivery are made recoverable; how rejected records are handled; and how the UI and `make verify` demonstrate the assignment's requirements. Record those decisions when there is enough evidence to make them, including changes prompted by experiments.
