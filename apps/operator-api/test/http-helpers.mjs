@@ -32,7 +32,7 @@ export function statusFixture() {
   };
 }
 
-export async function startOperator(t, handler) {
+export async function startOperator(t, handler, processControl) {
   const requests = [];
   let upstream;
   let origin;
@@ -49,7 +49,7 @@ export async function startOperator(t, handler) {
     origin = `http://127.0.0.1:${upstream.address().port}`;
   }
 
-  const app = await createApp(origin);
+  const app = await createApp(origin, processControl);
   await app.listen(0, '127.0.0.1');
   const url = await app.getUrl();
   t.after(async () => {

@@ -6,11 +6,21 @@ import type { Request, Response, NextFunction } from 'express';
 import { ApiError, ApiErrorFilter } from './api-error.js';
 import { OperatorController } from './operator.controller.js';
 import { ReplicatorClient } from './replicator-client.js';
+import { OperationsService } from './operations.service.js';
+import { ProcessController } from './process.controller.js';
+import { ProcessControlService } from './process-control.service.js';
 
-export async function createApp(replicatorUrl?: string) {
+export async function createApp(
+  replicatorUrl?: string,
+  processControl = new ProcessControlService(),
+) {
   @Module({
-    controllers: [OperatorController],
-    providers: [{ provide: ReplicatorClient, useValue: new ReplicatorClient(replicatorUrl) }],
+    controllers: [OperatorController, ProcessController],
+    providers: [
+      { provide: ReplicatorClient, useValue: new ReplicatorClient(replicatorUrl) },
+      { provide: OperationsService, useValue: new OperationsService() },
+      { provide: ProcessControlService, useValue: processControl },
+    ],
   })
   class OperatorModule {}
 

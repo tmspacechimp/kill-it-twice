@@ -2,10 +2,14 @@ import { Body, Controller, Get, HttpCode, Inject, Param, Post, Put, Query } from
 import { tokenSchema } from './contracts.js';
 import { parseConfigurationUpdate, parseDlqQuery, parseInput, requireEmpty } from './input.js';
 import { ReplicatorClient } from './replicator-client.js';
+import { OperationsService } from './operations.service.js';
 
 @Controller('api')
 export class OperatorController {
-  constructor(@Inject(ReplicatorClient) private readonly replicator: ReplicatorClient) {}
+  constructor(
+    @Inject(ReplicatorClient) private readonly replicator: ReplicatorClient,
+    @Inject(OperationsService) private readonly operations: OperationsService,
+  ) {}
 
   @Get('status')
   status(@Query() query: unknown) {
@@ -18,7 +22,7 @@ export class OperatorController {
   start(@Body() body: unknown, @Query() query: unknown) {
     requireEmpty(body);
     requireEmpty(query);
-    return this.replicator.start();
+    return this.operations.exclusive(['replicator'], () => this.replicator.start());
   }
 
   @Post('replication/stop')
@@ -26,7 +30,7 @@ export class OperatorController {
   stop(@Body() body: unknown, @Query() query: unknown) {
     requireEmpty(body);
     requireEmpty(query);
-    return this.replicator.stop();
+    return this.operations.exclusive(['replicator'], () => this.replicator.stop());
   }
 
   @Get('config')
@@ -38,7 +42,10 @@ export class OperatorController {
   @Put('config')
   updateConfiguration(@Body() body: unknown, @Query() query: unknown) {
     requireEmpty(query);
-    return this.replicator.updateConfiguration(parseConfigurationUpdate(body));
+    const update = parseConfigurationUpdate(body);
+    return this.operations.exclusive(['replicator'], () =>
+      this.replicator.updateConfiguration(update),
+    );
   }
 
   @Get('dlq')
@@ -51,7 +58,10 @@ export class OperatorController {
   replay(@Param('id') id: string, @Body() body: unknown, @Query() query: unknown) {
     requireEmpty(body);
     requireEmpty(query);
-    return this.replicator.replay(parseInput(tokenSchema, id));
+    const token = parseInput(tokenSchema, id);
+    return this.operations.exclusive(['replicator', 'opensearch'], () =>
+      this.replicator.replay(token),
+    );
   }
 
   @Post('simulations/rejected-records')
@@ -59,6 +69,8 @@ export class OperatorController {
   rejectedRecords(@Body() body: unknown, @Query() query: unknown) {
     requireEmpty(body);
     requireEmpty(query);
-    return this.replicator.rejectedRecords();
+    return this.operations.exclusive(['writer', 'replicator', 'opensearch'], () =>
+      this.replicator.rejectedRecords(),
+    );
   }
 }
