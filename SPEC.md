@@ -120,6 +120,31 @@ OpenSearch and OpenSearch Dashboards are pinned together at 3.4.0. The previous 
 
 Compose runs a one-time `dashboards-setup` service after the Dashboards HTTP health check passes. It creates the `shipments` index pattern with saved-object ID `shipments` and no time field, using the Dashboards saved-object API. It can run before the shipment index exists; Discover discovers fields when data is available. A rerun preserves an existing compatible pattern and fails clearly if that fixed ID targets something else or has a time filter. It changes no default index pattern or unrelated saved objects. The setup script uses the same pinned Dashboards image, times out HTTP requests after ten seconds, and exits on errors without retries. The setup also sets the Dashboards `defaultColumns` preference to `shipment_id`, `version`, `status`, `id`, and `occurred_at`. Rerunning setup reapplies these columns. The README links directly to Discover with that pattern and those columns explicitly selected, rather than the whole `_source` document. Dashboards stores its own configuration in OpenSearch, never in the source database. This adds an inspection tool only: it does not provide pipeline controls, lag reporting, DLQ handling, failure simulation, or evidence for the assignment's failure gates.
 
+## Operator API foundation (issue #29)
+
+Issue #29 authorizes a separate NestJS operator API as the first part of #28.
+It exposes status, replication start/stop, configuration, DLQ inspection/replay,
+and the gate-owned rejected-record simulation through a typed HTTP client.
+The [operator API contract](docs/operator-api.md) defines the wire shapes and
+runtime validation. Gate/metrics work owns metric definitions, supported settings,
+processing controls and the G4 mechanism. None exists in the current replicator;
+missing or unreachable integrations return explicit unavailable reasons.
+
+The API starts independently of the replicator and destinations. Each configured
+status request makes one upstream call with a two-second deadline; it does not poll,
+cache, retry, calculate metrics or replace missing values with zero. Only a valid
+available status gets a successful-response timestamp. Mutations require confirmed
+completion; a timeout or an accepted-but-unfinished response is not success.
+Configuration writes validate against the backend's freshly advertised settings;
+the backend remains responsible for validating its domain constraints on application.
+
+This foundation does not change the replicator's startup, finite polling, shutdown
+or serial append-only writer rules. It adds no persisted progress, recovery,
+processing retries or DLQ mechanism, and does not emulate graceful controls with
+container commands. Process controls, operation tracking, Angular and Compose
+integration are separate subtickets #30–#32. Contract tests are not failure-gate
+evidence.
+
 ## Boundaries and future work
 
 This v0.5 makes no claim about recovery, complete delivery, duplicates, concurrent updates, or behavior when a destination fails. It has no checkpoints, retry policy, DLQ, observability UI, or `make verify`. Do not describe the visible happy path as proof of any failure gate.

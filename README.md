@@ -130,6 +130,7 @@ make down
 
 ## More
 
+- [Operator API contract and local setup](docs/operator-api.md): the #29 API foundation; unavailable gate integrations are explicit. UI and Docker controls follow in separate tickets.
 - [Detailed usage and development](docs/development.md): configuration, inspection, seeding, and tests.
 - [Specification](SPEC.md): data model, behavior, and limitations.
 - [Validation history](docs/validation-history.md): recorded runs and the customer-to-shipment change.
