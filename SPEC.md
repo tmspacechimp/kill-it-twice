@@ -181,6 +181,29 @@ controls stay disabled until a confirmed outcome; lost operation status leaves
 pending controls disabled and displays a tracking error. The page makes no health
 or resume claim from a completed Docker command. Docker integration follows in #32.
 
+## Operator Compose integration (issue #32)
+
+Compose builds the NestJS API and Angular page. The page's nginx serves static
+assets and proxies `/api` to the API, resolving its container name at request time.
+Neither service depends on replicator or OpenSearch health. The page binds to
+loopback at `OPERATOR_UI_PORT` (default 8080); the API has no published host port.
+The Dashboards link uses the configured host port through a runtime asset.
+
+The API image includes Docker CLI/Compose and runs as root for the mounted Docker
+socket. This grants control of the local Docker daemon. The project directory is
+mounted read-only at `/project`, including its environment file. Commands use the
+same Compose project name as the outer stack. Use a single Compose file and keep
+its environment file consistent with the running stack; host-only overrides and
+additional override files are not propagated. Commands do not recreate bind-mounted
+services from container-relative paths. Build source-writer and create simulation
+target containers first. `make build` and `make up` include both operator apps;
+`make operator` starts just those two apps.
+
+The current replicator still has no HTTP metrics/control interface: the configured
+endpoint is unreachable even when its processing loop is running. The page reports
+that honestly. Graceful resume, live gate metrics, DLQ and G4 remain unfinished in
+#28. Live operator verification is recorded separately from gate acceptance.
+
 ## Boundaries and future work
 
 This v0.5 makes no claim about recovery, complete delivery, duplicates, concurrent updates, or behavior when a destination fails. It has no checkpoints, retry policy, DLQ mechanism, live gate metrics, or `make verify`. The operator page exposes available integrations and explains missing ones. Do not describe the visible happy path as proof of any failure gate.

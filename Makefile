@@ -6,7 +6,7 @@ RATE ?= 20
 ID ?= 1
 TAIL ?= 30
 
-.PHONY: help init build postgres infra dashboards up restart stop down logs status
+.PHONY: help init build postgres infra dashboards operator up restart stop down logs status
 .PHONY: seed generate append history shipment counts queue check-id
 
 help:
@@ -16,7 +16,8 @@ help:
 	@echo "postgres    Start PostgreSQL and wait until healthy"
 	@echo "infra       Start all infrastructure and configure Discover"
 	@echo "dashboards  Start OpenSearch/Dashboards and configure Discover"
-	@echo "up          Start replicator and consumer (or SERVICES='consumer')"
+	@echo "up          Start applications, including the operator (or SERVICES='consumer')"
+	@echo "operator    Start only the operator API and page"
 	@echo "seed        Seed initial fixtures (optional SEED_ARGS='--shipments 3')"
 	@echo "generate    Append live events (COUNT=500 RATE=20)"
 	@echo "append      Append one status (ID=4001 STATUS=created)"
@@ -34,7 +35,7 @@ init:
 	@if test -f .env; then echo "Keeping existing .env"; else cp .env.example .env; echo "Created .env; set both passwords before starting"; fi
 
 build:
-	@$(COMPOSE) build $(or $(SERVICES),replicator consumer source-writer)
+	@$(COMPOSE) build $(or $(SERVICES),replicator consumer source-writer operator-api operator-ui)
 
 postgres:
 	@$(COMPOSE) up -d --wait postgres
@@ -47,8 +48,11 @@ dashboards:
 	@$(COMPOSE) up -d --wait opensearch dashboards
 	@$(COMPOSE) run --rm --no-deps -T dashboards-setup
 
+operator:
+	@$(COMPOSE) up -d operator-api operator-ui
+
 up:
-	@$(COMPOSE) up -d $(or $(SERVICES),replicator consumer)
+	@$(COMPOSE) up -d $(or $(SERVICES),replicator consumer operator-api operator-ui)
 
 restart:
 	@$(COMPOSE) restart $(or $(SERVICES),replicator)

@@ -59,7 +59,8 @@ export class AppComponent {
   readonly operations = inject(OperationsService);
   readonly dashboardsUrl = (() => {
     const url = new URL('/app/discover', window.location.href);
-    url.port = '5601';
+    const port = (window as Window & { operatorDashboardsPort?: string }).operatorDashboardsPort;
+    url.port = port && /^[0-9]+$/.test(port) ? port : '5601';
     url.hash = '/?_a=(columns:!(shipment_id,version,status,id,occurred_at),index:shipments)';
     return url.href;
   })();
