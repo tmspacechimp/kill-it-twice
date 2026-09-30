@@ -145,6 +145,27 @@ container commands. Process controls, operation tracking, Angular and Compose
 integration are separate subtickets #30–#32. Contract tests are not failure-gate
 evidence.
 
+## Operator process controls (issue #30)
+
+The operator API accepts source generation and four fixed container actions.
+One adapter invokes Docker Compose with argument arrays for a configured project,
+Compose file and project directory. Generation validates the existing writer's
+count/rate limits and reports success only after exit zero and confirmation of the
+requested inserted count. Earlier commits remain on failure. Container actions use
+SIGKILL/restart for the replicator and stop/start for OpenSearch; completion confirms
+Docker's command, not service health or persisted resume.
+
+These commands return HTTP 202 and an in-memory operation ID. GET by ID reports
+pending, succeeded or failed, timestamps and a bounded output tail. The API keeps
+100 recent operations. Restarting the API loses tracking and does not cancel or
+resume writer containers. Confirm external writer activity before another write;
+the serial-writer rule still applies to external seed/append/generate commands.
+
+Operator commands lock writer, replicator or OpenSearch resources; conflicts return
+HTTP 409. Graceful replication/configuration calls share the replicator lock,
+replay shares replicator/OpenSearch locks, and G4 shares all three. No gate behavior
+is implemented here. Docker packaging follows in #32.
+
 ## Boundaries and future work
 
 This v0.5 makes no claim about recovery, complete delivery, duplicates, concurrent updates, or behavior when a destination fails. It has no checkpoints, retry policy, DLQ, observability UI, or `make verify`. Do not describe the visible happy path as proof of any failure gate.

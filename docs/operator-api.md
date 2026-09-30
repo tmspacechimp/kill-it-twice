@@ -100,8 +100,8 @@ Completion data is `{ "completed": true, "message": "..." }` and must only be
 returned after the requested action finishes. HTTP 202 or unconfirmed responses
 are not success: the operator returns `unconfirmed` and the caller must inspect
 state before deciding what to do next. Timeouts also do not prove a mutation was
-rolled back. Operation IDs and pending-operation tracking belong to #30, not this
-contract version. No mutation is automatically retried.
+rolled back. Docker/source operation IDs are described below. Gate HTTP commands
+still require completion within their deadline. No mutation is automatically retried.
 
 ## Errors and input validation
 
@@ -121,6 +121,43 @@ Backend error text is forwarded only from a validated unavailable envelope, neve
 raw HTML or an arbitrary response body. Unexpected local failures use HTTP 500
 with a generic reason. Responses disable caching. Request parameters are never
 treated as URLs, commands or service names.
+
+## Source and container operations (issue #30)
+
+Set `OPERATOR_COMPOSE_PROJECT` to the running Compose project name, and
+`OPERATOR_COMPOSE_FILE` and `OPERATOR_COMPOSE_DIRECTORY` to absolute paths accessible
+to the operator. Set all three together; without them Docker controls return 503.
+The directory must contain the same environment configuration as the running stack.
+Docker CLI/Compose and daemon access are required. Container setup follows in #32.
+
+The following POST routes accept no body or `{}`, except generation:
+
+| Route | Fixed action |
+| --- | --- |
+| `/api/source/generate` | `{ "count": 500, "rate": 20 }`; existing source-writer CLI |
+| `/api/simulations/replicator/kill` | Compose kill with SIGKILL |
+| `/api/simulations/replicator/restart` | Compose restart replicator |
+| `/api/simulations/opensearch/stop` | Compose stop opensearch |
+| `/api/simulations/opensearch/restore` | Compose start opensearch |
+
+Generation permits integer count 1–2147483647 and rate 1–1000. It starts no dependent
+services and builds no image. Seed first and build source-writer beforehand.
+Success requires the requested final inserted count; interruption is not success.
+Container actions require existing containers. They have a 30-second CLI deadline;
+generation can run as long as its requested count/rate requires.
+
+HTTP 202 returns `{ id, action, resources, state, startedAt, finishedAt, message }`.
+Poll `GET /api/operations/:id` for `pending`, `succeeded` or `failed`. Do not treat
+202 as completion. A Docker success confirms the command, not component health.
+Output retains its last 4096 characters. Unknown/expired IDs return 404; the most
+recent 100 records are held in memory. An API restart loses them, but a writer
+container may remain active. Check active writers before submitting more work.
+
+Conflict groups are `writer`, `replicator`, and `opensearch`. Source generation
+locks writer; each container action locks its component; start/stop/configuration
+lock replicator; replay locks replicator and OpenSearch; G4 locks all three.
+Conflicts return 409. External CLI writers cannot be coordinated by these in-memory
+locks: the existing one-serial-writer rule applies to all writer commands.
 
 ## Verification limits and next tickets
 

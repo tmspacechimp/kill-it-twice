@@ -9,6 +9,7 @@ export class ApiError extends HttpException {
   constructor(status: number, code: string, reason: string) {
     const details: Unavailable = { available: false, code, reason };
     super(details, status);
+    this.message = reason;
     this.details = details;
   }
 }
