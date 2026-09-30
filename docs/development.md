@@ -2,15 +2,9 @@
 
 For a quick start, see the [README](../README.md). The [specification](../SPEC.md) defines the source contract and implementation boundaries; [validation history](validation-history.md) records observed runs.
 
-## Current application behavior (shipments)
+## Event format
 
-The replicator reads the maximum event ID on its first startup and persists that boundary. Restarts reuse the boundary and resume the saved initial and incremental cursors. Existing rows through that boundary form the initial load. A separate read-only connection immediately polls for greater IDs while initial loading is in progress. Both readers use batches of at most 1,000, ordered by ID. An empty table means zero initial rows; a missing table fails with instructions to seed first. The single serial, append-only writer assumption makes the ID boundary valid without a long-lived snapshot transaction.
-
-For each row, each reader awaits a versioned PUT to `shipments/_doc/<shipment ID>` in OpenSearch, then publishes a JSON event to RabbitMQ queue `shipments.initial-load` and awaits broker confirmation. Every event is published, including older or replayed versions. Only a higher shipment version replaces the OpenSearch document; recognized version conflicts continue to publication, while other errors stop processing. Both destinations contain all five event fields; timestamps use ISO UTC strings. The readers can interleave events, so consumer logs need not be in event-ID or shipment-version order.
-
-Polling waits indefinitely for the first incremental rows; startup empty reads do not count. After the first nonempty incremental batch, polling stops after `POLL_MAX_EMPTY` consecutive empty reads (default 3); any later nonempty batch resets the counter. Full batches drain immediately; empty or partial batches wait `POLL_INTERVAL_MS` (default 1000), except after the final empty read. The first poll is immediate. If no incremental rows arrive, polling stays alive until shutdown or error, even after initial loading finishes. Polling may stop before initial loading finishes, and does not restart automatically. The process exits after both readers finish. SIGINT/SIGTERM stop between records and interrupt waits; failures cancel the sibling reader before cleanup.
-
-The independent plain TypeScript consumer connects to RabbitMQ and owns a separate SQLite receipt database. It logs each new event in full and logs `Duplicate event received: sourceId=<ID>; skipping` for repeated IDs. It manually acknowledges after the receipt commits and the log call returns. It stays subscribed after the replicator exits. Events look like this (illustrative shape):
+The consumer logs new messages in full. An event looks like this:
 
 ```json
 {"type":"shipment.status","sourceId":3,"record":{"id":3,"shipment_id":1,"version":3,"status":"delivered","occurred_at":"2025-01-01T00:03:00.000Z"}}
@@ -32,7 +26,23 @@ Do not overwrite an existing local configuration. Infrastructure host ports come
 
 Passwords initialize new PostgreSQL/RabbitMQ volumes only; editing `.env` does not update credentials in existing volumes.
 
+### Configuration reference
+
+The checked-in [`.env.example`](../.env.example) is the full Compose reference. `SEED_SHIPMENTS` defaults to 4000 and controls both normal seeding and the G1 fixture. `POLL_INTERVAL_MS` defaults to 1000 milliseconds; `POLL_MAX_EMPTY` defaults to 3 and starts counting only after incremental rows arrive. `POSTGRES_PORT`, `OPENSEARCH_PORT`, `DASHBOARDS_PORT`, `RABBITMQ_PORT`, and `RABBITMQ_MANAGEMENT_PORT` select host ports. The separate [`.env.verify`](../.env.verify) sets the G1 crash event and wait timeout. Exported environment variables can override these file values.
+
 ## Run and inspect shipments
+
+The Make targets also accept a service selection when an individual application needs rebuilding or restarting:
+
+```sh
+make build SERVICES=replicator
+make up SERVICES=consumer
+make logs SERVICES=replicator TAIL=all
+make restart SERVICES=replicator
+make stop SERVICES="replicator consumer"
+```
+
+`make up` does not seed or rebuild images. `make restart` retains checkpoint and receipt volumes. `make down` removes containers while retaining volumes.
 
 The following is the shipment workflow. Expected results for a fresh seed are 10,000 published events and 4,000 shipment documents. The [validation history](validation-history.md) records a successful run.
 
@@ -83,7 +93,7 @@ make queue
 
 An empty queue while the consumer is running is not proof that every event was logged. To observe queued publications, stop the consumer, restart the replicator, and run `make generate`. Inspect with `make queue`, then start the consumer. Restarting resumes saved progress rather than republishing the snapshot.
 
-After both initial loading and polling complete, expect the replicator to exit with code 0 while the consumer remains running. To observe live generation manually, run `make generate COUNT=500 RATE=20` in another terminal when ready; startup polling waits for this first activity; see [live traffic generation](../README.md#generate-live-traffic). New rows after polling stops need another run. Resume unfinished work with `make restart`; an event interrupted before checkpoint commit can be republished. To stop and remove containers while retaining data, use `make down`. No walkthrough step requires deleting existing volumes.
+After both initial loading and polling complete, expect the replicator to exit with code 0 while the consumer remains running. To observe live generation manually, run `make generate COUNT=500 RATE=20` in another terminal when ready; startup polling waits for this first activity; see [source seed](#source-seed). New rows after polling stops need another run. Resume unfinished work with `make restart`; an event interrupted before checkpoint commit can be republished. To stop and remove containers while retaining data, use `make down`. No walkthrough step requires deleting existing volumes.
 
 A clean-source walkthrough needs unused volumes. Use a new `COMPOSE_PROJECT_NAME` and unused host ports, consistently for Compose and `make seed`, to preserve existing data. Application image tags remain shared.
 
@@ -184,6 +194,14 @@ npm start --prefix apps/consumer
 The replicator build runs format:check, lint, and typecheck before compiling; any failed check stops the build. This also applies to its Docker build. The consumer keeps its TypeScript-only build.
 
 All application Dockerfiles compile TypeScript and ship runtime dependencies as the Node user.
+
+## Troubleshooting
+
+- If startup reports a missing source table, run `make infra` and `make seed` before `make up`.
+- If the replicator remains active after initial loading, it is waiting for its first incremental row. Run `make generate` or stop the service. Empty startup polls do not trigger the idle limit.
+- If new rows do not appear after `Polling stopped`, run `make restart`; that process's polling session has ended.
+- If Discover looks empty just after indexing, refresh the page or reopen the [shipment Discover view](http://localhost:5601/app/discover#/?_a=%28columns%3A!%28shipment_id%2Cversion%2Cstatus%2Cid%2Coccurred_at%29%2Cindex%3Ashipments%29). Search follows OpenSearch refresh timing.
+- If a changed `.env` password is rejected against an old PostgreSQL or RabbitMQ volume, remember that the password only initialized that volume. Use its existing credential or a new isolated Compose project; changing `.env` alone does not rotate the stored password.
 
 ## Limitations
 
