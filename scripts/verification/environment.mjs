@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { executeDocker } from '../logging/docker.mjs';
 import { setTimeout } from 'node:timers/promises';
 
 const CHECKPOINT_QUERY = `
@@ -11,36 +11,36 @@ const CHECKPOINT_QUERY = `
 
 // Docker commands and data collection only. Assertions belong to the scenario.
 export class VerificationEnvironment {
-  constructor(projectName) {
+  constructor(projectName, evidence) {
+    this.evidence = evidence;
+    this.documentBatch = 0;
     this.projectName = projectName;
     this.crashEventId = '';
   }
 
   compose(...arguments_) {
-    let executable = 'docker';
-    let command = [];
-    if (process.platform === 'win32') {
-      executable = 'wsl.exe';
-      // Pass the setting explicitly across the Windows/WSL boundary.
-      command = [
-        '--cd',
-        process.cwd(),
-        '--exec',
-        'env',
-        `G1_CRASH_EVENT_ID=${this.crashEventId}`,
-        `SEED_SHIPMENTS=${process.env.SEED_SHIPMENTS ?? '4000'}`,
-        'docker',
-      ];
+    const command = ['compose', '-f', 'compose.verify.yaml', '-p', this.projectName, ...arguments_];
+    const settings = {
+      G1_CRASH_EVENT_ID: String(this.crashEventId),
+      G1_SEED_SHIPMENTS: process.env.G1_SEED_SHIPMENTS ?? '4000',
+    };
+    try {
+      const result = executeDocker(command, settings);
+      this.evidence.append('commands.jsonl', {
+        command, stdout: result.stdout, stderr: result.stderr, status: 0,
+      });
+      if (arguments_.includes('source-writer') && arguments_[0] === 'run') {
+        this.evidence.append('source-writer.jsonl', {
+          service: 'source-writer', stdout: result.stdout, stderr: result.stderr,
+        });
+      }
+      return result.stdout.trim();
+    } catch (error) {
+      this.evidence.append('commands.jsonl', {
+        command, stdout: error.stdout, stderr: error.stderr, error: error.message,
+      });
+      throw error;
     }
-    command.push('compose', '-f', 'compose.verify.yaml', '-p', this.projectName, ...arguments_);
-
-    return execFileSync(executable, command, {
-      encoding: 'utf8',
-      env: { ...process.env, G1_CRASH_EVENT_ID: String(this.crashEventId) },
-      maxBuffer: 32 * 1024 * 1024,
-      timeout: 10 * 60 * 1000,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    }).trim();
   }
 
   buildApplications() {
@@ -75,10 +75,15 @@ export class VerificationEnvironment {
     );
   }
 
-  recreateReplicator() {
+  async recreateReplicator() {
+    // Stop the reader before removing a container so its last snapshot is retained.
+    await this.evidence.stopCollector();
+    this.evidence.snapshot();
+    this.evidence.timeline('recreate replicator', { service: 'replicator', status: this.replicatorStatus() });
     this.crashEventId = '';
     // Replacing the container proves recovery uses the retained named volume.
     this.compose('up', '-d', '--force-recreate', 'replicator');
+    this.evidence.startCollector(this.projectName);
   }
 
   replicatorStatus() {
@@ -100,6 +105,10 @@ export class VerificationEnvironment {
         CHECKPOINT_QUERY,
       ),
     );
+  }
+
+  readRunningCheckpoint() {
+    return JSON.parse(this.compose('exec', '-T', 'replicator', 'node', '-e', CHECKPOINT_QUERY));
   }
 
   readSourceEvents() {
@@ -157,7 +166,9 @@ export class VerificationEnvironment {
       body,
     );
     // GET by ID avoids depending on OpenSearch's asynchronous search refresh.
-    return JSON.parse(response).docs;
+    const documents = JSON.parse(response).docs;
+    this.evidence.save(`validation/opensearch-batch-${++this.documentBatch}.json`, { shipmentIds, documents });
+    return documents;
   }
 
   failureLogs() {

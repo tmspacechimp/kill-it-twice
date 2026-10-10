@@ -37,3 +37,26 @@ The receipt commits before console output. A consumer crash in that gap can omit
 Under a single serial, append-only source writer, one replicator per checkpoint volume, one consumer per receipt volume, and intact source, destination services, and volumes, the pipeline provides **at-least-once processing across replicator process interruption**. G1 injects a crash after confirmed publication and before checkpointing, then checks replay, resumed cursors, complete event logs, and current shipment documents. [G1.md](G1.md) states exactly what the test proves.
 
 There is no automatic retry or reconnect for destination outages, no durable broker stream, no DLQ or rejected-record replay, no continuous incremental service, and no operational control UI. The current test does not establish recovery from broker or disk loss, consumer crash, concurrent source writers, or exactly-once delivery. See [submission notes](docs/submission-notes.md) for gate status and capacity evidence.
+
+## Logged runs
+
+`make run` builds the applications, starts infrastructure, seeds an empty source,
+starts the applications, and appends configured incremental events after the
+replicator has captured its startup boundary. Existing history and state are
+retained; an active writer or replicator prevents a new run. Logs are collected
+until Ctrl+C, leaving regular services available for inspection. After successful
+replicator exit, the demo checks generated traffic, complete consumer receipt
+coverage, current-run payloads, and latest shipment documents. It saves counts,
+checks, and wall-clock timings in `report.json` and the summary. This validates
+the observed demo outcome; G1 remains the crash-recovery scenario.
+
+`make reset` removes the current Compose project's containers and data volumes,
+including source history, index, checkpoints, and receipts. `make run-fresh`
+resets first, then runs the demo. Both retain saved host logs and configuration.
+
+Demo runs use DEMO_SEED_SHIPMENTS and DEMO_INCREMENTAL_EVENTS from `.env`;
+G1 uses G1_SEED_SHIPMENTS from `.env.verify`. The replicator's polling and recovery
+rules remain unchanged. Demo logs are size-limited; G1 evidence is retained
+until deleted. Collection or cleanup failures prevent G1 PASS.
+[Run-log details](docs/run-logs.md) explain configuration, saved evidence, and
+incomplete runs.
