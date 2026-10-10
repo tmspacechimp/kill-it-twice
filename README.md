@@ -1,5 +1,7 @@
 # Kill It Twice
 
+The version submitted to Optio is preserved on the [`submission`](https://github.com/tmspacechimp/kill-it-twice/tree/submission) branch.
+
 A shipment replication demo: PostgreSQL event history goes through a NestJS
 replicator into OpenSearch and RabbitMQ. A separate consumer logs events and
 detects duplicates. [SPEC.md](SPEC.md) describes the design.
