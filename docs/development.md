@@ -28,7 +28,7 @@ Passwords initialize new PostgreSQL/RabbitMQ volumes only; editing `.env` does n
 
 ### Configuration reference
 
-The checked-in [`.env.example`](../.env.example) is the full Compose reference. `SEED_SHIPMENTS` defaults to 4000 and controls both normal seeding and the G1 fixture. `POLL_INTERVAL_MS` defaults to 1000 milliseconds; `POLL_MAX_EMPTY` defaults to 3 and starts counting only after incremental rows arrive. `POSTGRES_PORT`, `OPENSEARCH_PORT`, `DASHBOARDS_PORT`, `RABBITMQ_PORT`, and `RABBITMQ_MANAGEMENT_PORT` select host ports. The separate [`.env.verify`](../.env.verify) sets the G1 crash event and wait timeout. Exported environment variables can override these file values.
+The checked-in [`.env.example`](../.env.example) is the full Compose reference. `DEMO_SEED_SHIPMENTS` defaults to 4000 and controls demo seeding. `DEMO_INCREMENTAL_EVENTS` (500) and `DEMO_INCREMENTAL_RATE` (20) control the automatic traffic in `make run`. G1 uses `G1_SEED_SHIPMENTS` in `.env.verify`. [The log guide](run-logs.md) covers saved runs. `POLL_INTERVAL_MS` defaults to 1000 milliseconds; `POLL_MAX_EMPTY` defaults to 3 and starts counting only after incremental rows arrive. `POSTGRES_PORT`, `OPENSEARCH_PORT`, `DASHBOARDS_PORT`, `RABBITMQ_PORT`, and `RABBITMQ_MANAGEMENT_PORT` select host ports. The separate [`.env.verify`](../.env.verify) sets the G1 fixture, crash event, and wait timeout. Exported environment variables can override these file values.
 
 ## Run and inspect shipments
 
@@ -99,7 +99,7 @@ A clean-source walkthrough needs unused volumes. Use a new `COMPOSE_PROJECT_NAME
 
 ## Browser inspection with Dashboards
 
-Normal Compose startup includes OpenSearch Dashboards 3.4.0, matching OpenSearch. Issue #22 moves OpenSearch from 3.3.2 to 3.4.0 because a matching Dashboards 3.3.2 image is unavailable. Starting this configuration against an existing project upgrades its OpenSearch container; use a separate project and unused ports for a fresh-data check that preserves the old volumes. To start Dashboards and its OpenSearch dependency:
+Demo Compose startup includes OpenSearch Dashboards 3.4.0, matching OpenSearch. Issue #22 moves OpenSearch from 3.3.2 to 3.4.0 because a matching Dashboards 3.3.2 image is unavailable. Starting this configuration against an existing project upgrades its OpenSearch container; use a separate project and unused ports for a fresh-data check that preserves the old volumes. To start Dashboards and its OpenSearch dependency:
 
 ```sh
 make dashboards
@@ -108,7 +108,7 @@ make logs SERVICES=dashboards
 
 Open [OpenSearch Dashboards](http://localhost:5601). Set `DASHBOARDS_PORT` in `.env` to override the host port; existing configurations without it use 5601. Dashboards connects to the internal OpenSearch HTTP address, independently of `OPENSEARCH_PORT`. Both security plugins are disabled for this local demo, so no login is required. Startup can take a minute after OpenSearch is healthy.
 
-1. Wait for `make infra` or `make dashboards` to finish successfully. These commands run setup in a disposable container and print its output directly. Normal Compose startup also includes the setup service.
+1. Wait for `make infra` or `make dashboards` to finish successfully. These commands run setup in a disposable container and print its output directly. Demo Compose startup also includes the setup service.
 2. Open [shipments in Discover](http://localhost:5601/app/discover#/?_a=%28columns%3A!%28shipment_id%2Cversion%2Cstatus%2Cid%2Coccurred_at%29%2Cindex%3Ashipments%29). The setup service creates the pattern with a stable ID and no time filter, so the January 2025 seed timestamps remain visible. It preserves a compatible existing pattern on reruns and sets the default Discover columns to `shipment_id`, `version`, `status`, `id`, and `occurred_at`. The direct link includes those columns so an earlier browser session cannot restore the whole-document view.
 3. Once replication has written data, search `shipment_id: 1`. Expand the document and inspect `shipment_id`, `version`, `status`, `id`, and `occurred_at`. With a fresh default seed, expect shipment 1, version 3, status `delivered`, event ID 3.
 4. Use **Refresh** after indexing changes. Search visibility follows OpenSearch's refresh timing. If you opened Discover before any shipment data existed, reopen the link after the initial writes. Existing data may contain higher versions than the sample.
@@ -117,7 +117,7 @@ Dashboards shows the current projection, not the complete source event history. 
 
 ## Source seed
 
-`make seed` builds and runs the independent TypeScript source-writer CLI against the running PostgreSQL service, user `source`, database `client_source`. Its Compose service is behind the `seed` profile, so normal startup does not seed automatically. The disposable writer runs with `--no-deps` and does not start PostgreSQL, the replicator, or the consumer, or reset volumes.
+`make seed` builds and runs the independent TypeScript source-writer CLI against the running PostgreSQL service, user `source`, database `client_source`. Its Compose service is behind the `seed` profile, so `make up` does not seed automatically; `make run` seeds an empty source explicitly. The disposable writer runs with `--no-deps` and does not start PostgreSQL, the replicator, or the consumer, or reset volumes.
 
 Use `make seed SEED_ARGS="--shipments 3"` for a smaller initial fixture (eight events). Counts must be positive integers whose generated IDs fit PostgreSQL integer columns. Runs always start at shipment/event ID 1; smaller counts retain existing data, and larger counts add missing initial histories. Complete seeding before generating: later fixture extensions can collide with appended IDs or insert behind the reader's cursor.
 

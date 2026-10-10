@@ -9,20 +9,32 @@ TAIL ?= 30
 
 .PHONY: help init build postgres infra dashboards up restart stop down logs status
 .PHONY: seed generate append history shipment counts queue check-id
-.PHONY: verify
+.PHONY: verify run run-fresh fresh-run reset
+
+run:
+	@$(NODE) scripts/demo/run-demo.mjs
+
+fresh-run: run-fresh
+
+run-fresh:
+	@$(MAKE) reset
+	@$(MAKE) run
 
 verify:
-	@$(NODE) scripts/verify-g1.mjs
+	@$(NODE) scripts/verification/verify-g1.mjs
 
 help:
-	@echo "Demo: make init, build, infra, seed, up; then make generate and logs"
+	@echo "Demo: make init, then make run"
 	@echo "init        Create .env if missing; then set both passwords"
 	@echo "build       Build all apps (or SERVICES='replicator consumer')"
 	@echo "postgres    Start PostgreSQL and wait until healthy"
 	@echo "infra       Start all infrastructure and configure Discover"
 	@echo "dashboards  Start OpenSearch/Dashboards and configure Discover"
+	@echo "run         Build, start, seed, replicate, generate traffic, and save logs"
+	@echo "run-fresh   Delete demo data, then run the complete demo from scratch"
+	@echo "reset       Remove demo containers and ALL data volumes; keep saved logs"
 	@echo "up          Start replicator and consumer (or SERVICES='consumer')"
-	@echo "seed        Seed SEED_SHIPMENTS from .env (optional SEED_ARGS='--shipments 3')"
+	@echo "seed        Seed DEMO_SEED_SHIPMENTS from .env (optional SEED_ARGS='--shipments 3')"
 	@echo "generate    Append live events (COUNT=500 RATE=20)"
 	@echo "append      Append one status (ID=4001 STATUS=created)"
 	@echo "logs        Follow recent app logs (SERVICES='consumer' TAIL=30)"
@@ -64,6 +76,9 @@ stop:
 
 down:
 	@$(COMPOSE) down
+
+reset:
+	@$(COMPOSE) --profile "*" down --volumes --remove-orphans
 
 logs:
 	@$(COMPOSE) logs --follow --tail=$(TAIL) $(or $(SERVICES),replicator consumer)
