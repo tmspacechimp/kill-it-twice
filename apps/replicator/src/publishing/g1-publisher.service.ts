@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PublisherService } from './publisher.service.js';
-import type { ShipmentEvent } from './shipment-event.js';
+import type { ShipmentEvent } from '../source/shipment-event.js';
 
 // Selected only for G1's first run; restart uses the normal publisher.
 @Injectable()

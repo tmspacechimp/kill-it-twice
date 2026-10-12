@@ -4,8 +4,11 @@ import test from 'node:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CheckpointService } from '../dist/checkpoint.service.js';
+import { CheckpointService } from '../dist/replication/checkpoint.service.js';
 import { setupLoad } from './load-test-helpers.mjs';
+import { CompositeIndexerService } from '../dist/indexing/composite-indexer.service.js';
+import { StateIndexerService } from '../dist/indexing/state-indexer.service.js';
+import { RecordIndexerService } from '../dist/indexing/record-indexer.service.js';
 
 function statePath(t) {
   const directory = mkdtempSync(join(tmpdir(), 'checkpoint-test-'));
@@ -99,4 +102,41 @@ test('corrupt checkpoint fails closed rather than starting over', async (t) => {
   await assert.rejects(load.run(), /not a database/);
   assert.equal(load.database.boundaryReads, 0);
   assert.equal(load.database.reads.length, 0);
+});
+
+test('history write failure leaves the event unpublished and its checkpoint unadvanced', async (t) => {
+  const checkpointPath = statePath(t);
+  const event = { id: 1, shipment_id: 42, version: 1, status: 'created' };
+  const load = setupLoad(t, { checkpointPath, initialReads: [[event]] });
+  const failure = new Error('history write failed');
+  const stateIndexer = new StateIndexerService();
+  const recordIndexer = new RecordIndexerService();
+  const writes = [];
+  t.mock.method(stateIndexer, 'index', async () => {
+    writes.push('shipments');
+  });
+  t.mock.method(recordIndexer, 'index', async () => {
+    writes.push('shipment-records');
+    throw failure;
+  });
+  const indexer = new CompositeIndexerService(stateIndexer, recordIndexer);
+  const published = [];
+  await assert.rejects(
+    load.run(async (record) => {
+      await indexer.index(record);
+      published.push(record.id);
+    }),
+    failure,
+  );
+  assert.deepEqual(writes, ['shipments', 'shipment-records']);
+  assert.deepEqual(published, []);
+
+  const checkpoint = new CheckpointService();
+  try {
+    const saved = await checkpoint.open(() => assert.fail('boundary must survive'), checkpointPath);
+    assert.equal(saved.initialId, null);
+    assert.equal(saved.initialDone, 0);
+  } finally {
+    checkpoint.close();
+  }
 });

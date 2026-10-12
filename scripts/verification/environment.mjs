@@ -151,24 +151,82 @@ export class VerificationEnvironment {
 
   readShipmentDocuments(shipmentIds) {
     const body = JSON.stringify({ ids: shipmentIds.map(String) });
-    const response = this.compose(
-      'exec',
-      '-T',
-      'opensearch',
-      'curl',
-      '--fail',
-      '--silent',
-      '--show-error',
-      'http://localhost:9200/shipments/_mget',
-      '-H',
-      'Content-Type: application/json',
-      '-d',
-      body,
-    );
+    const response = this.requestOpenSearch('POST', '/shipments/_mget', body);
+    this.assertCompleteResponse(response, '/shipments/_mget');
     // GET by ID avoids depending on OpenSearch's asynchronous search refresh.
-    const documents = JSON.parse(response).docs;
+    const documents = response.docs;
     this.evidence.save(`validation/opensearch-batch-${++this.documentBatch}.json`, { shipmentIds, documents });
     return documents;
+  }
+
+  requestOpenSearch(method, path, body) {
+    const arguments_ = [
+      'exec', '-T', 'opensearch', 'curl',
+      '--fail', '--silent', '--show-error',
+      '-X', method, 'http://localhost:9200' + path,
+    ];
+    if (body !== undefined) {
+      arguments_.push('-H', 'Content-Type: application/json', '-d', body);
+    }
+    return JSON.parse(this.compose(...arguments_));
+  }
+
+  assertCompleteResponse(response, path) {
+    if (response.timed_out || response._shards?.failed > 0) {
+      throw new Error('Incomplete OpenSearch response for ' + path);
+    }
+  }
+
+  *readShipmentRecords() {
+    const refresh = this.requestOpenSearch('POST', '/shipment-records/_refresh');
+    this.assertCompleteResponse(refresh, '/shipment-records/_refresh');
+    let scrollId;
+    let pageNumber = 0;
+    let received = 0;
+    try {
+      let response = this.requestOpenSearch('POST', '/shipment-records/_search?scroll=1m',
+        JSON.stringify({ size: 500, sort: ['_doc'], track_total_hits: true }));
+      let expected;
+
+      while (true) {
+        scrollId = response._scroll_id ?? scrollId;
+        this.evidence.save(
+          `validation/opensearch-records-batch-${++pageNumber}.json`,
+          response,
+        );
+        this.assertCompleteResponse(response, 'history scroll page ' + pageNumber);
+        if (!response._scroll_id) throw new Error('Missing OpenSearch history scroll ID');
+        const total = response.hits?.total;
+        if (
+          total?.relation !== 'eq' ||
+          !Number.isSafeInteger(total.value) ||
+          total.value < 0
+        ) {
+          throw new Error('OpenSearch did not return an exact history document count');
+        }
+        expected ??= total.value;
+        if (total.value !== expected) {
+          throw new Error('OpenSearch history document count changed during the scan');
+        }
+        const documents = response.hits.hits;
+        if (!Array.isArray(documents) || documents.length > 500) {
+          throw new Error('Invalid OpenSearch history page');
+        }
+        if (documents.length === 0) break;
+        received += documents.length;
+        yield documents;
+        response = this.requestOpenSearch('POST', '/_search/scroll',
+          JSON.stringify({ scroll: '1m', scroll_id: scrollId }));
+      }
+      if (received !== expected) {
+        throw new Error(`Incomplete OpenSearch history scan: ${received} of ${expected} documents`);
+      }
+    } finally {
+      if (scrollId) {
+        this.requestOpenSearch('DELETE', '/_search/scroll',
+          JSON.stringify({ scroll_id: [scrollId] }));
+      }
+    }
   }
 
   failureLogs() {

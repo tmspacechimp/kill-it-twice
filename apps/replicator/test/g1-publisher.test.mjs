@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { G1PublisherService } from '../dist/g1-publisher.service.js';
+import { G1PublisherService } from '../dist/publishing/g1-publisher.service.js';
 
 function setupPublisher(t, confirmation) {
   const previousId = process.env.G1_CRASH_EVENT_ID;

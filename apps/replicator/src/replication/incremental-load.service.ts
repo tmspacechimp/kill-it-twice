@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { setTimeout } from 'node:timers/promises';
-import { BATCH_SIZE, ShipmentSourceService } from './shipment-source.service.js';
-import type { ProcessRecord } from './shipment-event.js';
+import { BATCH_SIZE, ShipmentSourceService } from '../source/shipment-source.service.js';
+import type { ProcessRecord } from '../source/shipment-event.js';
 import type { PollingOptions } from './polling-options.js';
 
 type PollingState = {

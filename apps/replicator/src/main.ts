@@ -1,15 +1,17 @@
 import 'reflect-metadata';
 import { Logger, Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { ShipmentSourceService } from './shipment-source.service.js';
-import { InitialLoadService } from './initial-load.service.js';
-import { IncrementalLoadService } from './incremental-load.service.js';
-import { ReplicationService } from './replication.service.js';
-import { readPollingOptions } from './polling-options.js';
-import { IndexerService } from './indexer.service.js';
-import { PublisherService } from './publisher.service.js';
-import { G1PublisherService } from './g1-publisher.service.js';
-import { CheckpointService } from './checkpoint.service.js';
+import { ShipmentSourceService } from './source/shipment-source.service.js';
+import { InitialLoadService } from './replication/initial-load.service.js';
+import { IncrementalLoadService } from './replication/incremental-load.service.js';
+import { ReplicationService } from './replication/replication.service.js';
+import { readPollingOptions } from './replication/polling-options.js';
+import { CompositeIndexerService } from './indexing/composite-indexer.service.js';
+import { StateIndexerService } from './indexing/state-indexer.service.js';
+import { RecordIndexerService } from './indexing/record-indexer.service.js';
+import { PublisherService } from './publishing/publisher.service.js';
+import { G1PublisherService } from './publishing/g1-publisher.service.js';
+import { CheckpointService } from './replication/checkpoint.service.js';
 
 @Module({
   providers: [
@@ -17,7 +19,9 @@ import { CheckpointService } from './checkpoint.service.js';
     InitialLoadService,
     IncrementalLoadService,
     ReplicationService,
-    IndexerService,
+    CompositeIndexerService,
+    StateIndexerService,
+    RecordIndexerService,
     {
       provide: PublisherService,
       useClass: process.env.G1_CRASH_EVENT_ID ? G1PublisherService : PublisherService,
@@ -35,7 +39,7 @@ async function bootstrap(): Promise<void> {
   process.once('SIGTERM', stop);
   const app = await NestFactory.createApplicationContext(AppModule);
   const publisher = app.get(PublisherService);
-  const indexer = app.get(IndexerService);
+  const indexer = app.get(CompositeIndexerService);
   try {
     await publisher.open();
     new Logger('Replicator').log('Replicator started');

@@ -8,6 +8,7 @@ import {
   assertConsumerCoverage,
   latestShipmentEvents,
   assertShipmentDocuments,
+  assertShipmentRecordCoverage,
 } from './outcomes.mjs';
 
 const run = new RunEvidence('verify-g1');
@@ -119,7 +120,15 @@ async function verifyG1() {
   run.save('validation/expected-shipments.json', shipments);
   checkIndexedShipments(shipments);
 
+  console.log('6. Compare every source event with OpenSearch history and prove replay was retained.');
+  const shipmentRecords = assertShipmentRecordCoverage(
+    sourceEvents, environment.readShipmentRecords(), CRASH_EVENT_ID,
+  );
+  run.save('validation/opensearch-records-summary.json', shipmentRecords);
+  run.timeline('verified OpenSearch history', shipmentRecords);
+
   return {
+    shipmentRecords,
     resumedAfter: checkpointAfterKill.initialId,
     duplicateEventId: CRASH_EVENT_ID,
     events: sourceEvents.length,
