@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { BATCH_SIZE, ShipmentSourceService } from './shipment-source.service.js';
-import type { ProcessRecord } from './shipment-event.js';
+import { BATCH_SIZE, ShipmentSourceService } from '../source/shipment-source.service.js';
+import type { ProcessRecord } from '../source/shipment-event.js';
 
 @Injectable()
 export class InitialLoadService {

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { connect, type ChannelModel, type ConfirmChannel } from 'amqplib';
-import type { ShipmentEvent } from './shipment-event.js';
+import type { ShipmentEvent } from '../source/shipment-event.js';
 
 const QUEUE = 'shipments.initial-load';
 

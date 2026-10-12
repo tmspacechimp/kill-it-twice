@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ShipmentSourceService } from './shipment-source.service.js';
+import { ShipmentSourceService } from '../source/shipment-source.service.js';
 import { InitialLoadService } from './initial-load.service.js';
 import { IncrementalLoadService } from './incremental-load.service.js';
-import type { ProcessRecord } from './shipment-event.js';
+import type { ProcessRecord } from '../source/shipment-event.js';
 import type { PollingOptions } from './polling-options.js';
 import { CheckpointService, type Checkpoint } from './checkpoint.service.js';
 

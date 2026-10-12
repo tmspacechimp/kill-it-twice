@@ -1,10 +1,10 @@
 import { Logger } from '@nestjs/common';
 import { Client } from 'pg';
-import { ShipmentSourceService } from '../dist/shipment-source.service.js';
-import { InitialLoadService } from '../dist/initial-load.service.js';
-import { IncrementalLoadService } from '../dist/incremental-load.service.js';
-import { ReplicationService } from '../dist/replication.service.js';
-import { CheckpointService } from '../dist/checkpoint.service.js';
+import { ShipmentSourceService } from '../dist/source/shipment-source.service.js';
+import { InitialLoadService } from '../dist/replication/initial-load.service.js';
+import { IncrementalLoadService } from '../dist/replication/incremental-load.service.js';
+import { ReplicationService } from '../dist/replication/replication.service.js';
+import { CheckpointService } from '../dist/replication/checkpoint.service.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

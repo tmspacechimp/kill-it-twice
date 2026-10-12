@@ -1,10 +1,12 @@
 # Reading the G1 test
 
-Start with `verifyG1()` in [verify-g1.mjs](verify-g1.mjs). It lists the five
+Start with `verifyG1()` in [verify-g1.mjs](verify-g1.mjs). It lists the six
 steps in execution order. Its helpers state the assertions for interruption and
 resume. [environment.mjs](environment.mjs) contains Docker commands and reads;
 [outcomes.mjs](outcomes.mjs) compares source data with observed destinations.
-Neither helper starts a test on import.
+Neither helper starts a test on import. The sixth step scans every history
+delivery, checks source IDs and full payloads, and requires the crash event's
+replay to appear under a separate document ID.
 
 For a walkthrough without reading code, see the [G1 report guide](../../docs/g1-report.md).
 It explains the scenario, required evidence, result counts, cursors, and timing.
@@ -20,7 +22,7 @@ Cleanup removes only that project's containers and volumes, including on failure
 For fast checks of the comparison code, without Docker:
 
 ```sh
-node --test scripts/verification/outcomes.test.mjs
+node --test scripts/verification/outcomes.test.mjs scripts/verification/environment.test.mjs
 ```
 
 Those checks deliberately feed missing events, duplicate IDs, incorrect payloads,

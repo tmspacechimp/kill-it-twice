@@ -17,7 +17,10 @@ successful checks, log collection, and cleanup produce `G1 PASS`.
 4. Confirm replay and resumed progress. After initial loading finishes, generate
    another nine events and wait for the replacement to exit successfully.
 5. Compare the full source history with consumer messages and the latest state
-   of every shipment with OpenSearch. Save logs and remove the isolated project.
+   of every shipment with OpenSearch.
+6. Refresh and scan OpenSearch history, compare every delivery payload, and
+   confirm the crash event has separate original and replay documents. Save
+   logs and remove the isolated project.
 
 The consumer, PostgreSQL, OpenSearch, and RabbitMQ stay alive across the injected
 replicator crash. [G1.md](../G1.md) explains the recovery design and its assumptions.
@@ -37,6 +40,7 @@ replicator crash. [G1.md](../G1.md) explains the recovery design and its assumpt
 | Work after initial loading | Initial completion is observed before the second batch of nine events is generated. The final source must contain exactly the initial fixture plus eighteen events. |
 | Successful completion | The replacement replicator exits with code 0 after the second traffic batch. Unexpected stops or replicator failure logs fail the scenario. |
 | Complete consumer coverage | Every source ID has exactly one normal consumer message of type `shipment.status` with its full matching record. Unknown IDs, missing IDs, repeated normal processing, and wrong payload fields fail. |
+| Complete OpenSearch history | Refresh `shipment-records`, scan 500-document scroll pages, and compare every document's source event ID and full payload. Every source event must occur; at least two distinct history documents must contain the crash event. Unknown IDs, corrupt payloads, repeated scan documents, and incomplete scans fail. |
 | Latest shipment state | For each shipment, select its highest-version source event, fetch its document by shipment ID, and compare the document's ID, existence, and complete payload. |
 | Evidence and cleanup | Collectors must finish without collection errors, final log snapshots must succeed, and removal of the isolated project's containers and volumes must succeed. |
 
@@ -44,7 +48,9 @@ Payload checks compare event ID, shipment ID, version, status, and occurrence
 time. Source UTC timestamps are normalized to the ISO spelling used by JSON logs.
 OpenSearch `_mget` fetches at most 500 expected shipments per batch, avoiding
 dependence on search refresh. It checks expected IDs rather than scanning for
-unrelated extra index documents.
+unrelated extra index documents. The separate history scan reads every
+`shipment-records` document, including duplicate deliveries, after an explicit
+refresh. Scroll resources are cleared on completion or failure.
 
 Reaching the expected consumer-message count only ends the delivery wait.
 Exact ID and payload comparisons then establish coverage; one duplicate or
@@ -76,6 +82,12 @@ printed after `G1 PASS`:
 | `events` | Number of rows in the final source snapshot, verified against `expectedEvents`. |
 | `shipments` | Number of distinct shipment IDs in that snapshot, each represented by its highest-version source event. Includes shipments introduced by incremental traffic. |
 | `duplicateDeliveries` | Number of explicit duplicate notices in the consumer logs. Counts notices, not distinct IDs. Must include a notice for `duplicateEventId`; normal messages are checked separately. |
+
+The `shipmentRecords` result contains `documents` (all history deliveries),
+`events` (distinct source IDs), `duplicateDeliveries` (documents minus distinct
+IDs), and `crashEventDeliveries` (at least two). Each scroll page is retained as
+`validation/opensearch-records-batch-<n>.json`, with aggregate counts in
+`validation/opensearch-records-summary.json`.
 
 A cursor records the last completed source event ID. It is not a message count
 or throughput metric. G1 uses contiguous source IDs to check the exact resumed
@@ -120,6 +132,7 @@ or cleanup fails; the top-level status is the final outcome.
 | `validation/initial-source.json`, `final-source.json` | The exact source fixtures used by the comparisons. |
 | `validation/restarted-replicator.json` | Restart logs used to check the retained boundary, cursors, and first resumed batch. |
 | `validation/consumer.json` | Normal messages and duplicate IDs parsed from consumer logs. |
+| `validation/opensearch-records-batch-*.json`, `opensearch-records-summary.json` | Full history scan pages and distinct-event, delivery, and replay counts. |
 | `validation/expected-shipments.json`, `opensearch-batch-*.json` | Highest-version source records and actual fetched documents. |
 | `services/` | Separate logs for the killed and replacement containers, plus lifecycle and collection diagnostics. |
 | `commands.jsonl`, `source-writer.jsonl` | Docker command results and output from removed one-off source writers. |

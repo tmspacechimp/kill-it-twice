@@ -1,5 +1,56 @@
 # Validation history
 
+## OpenSearch inheritance and source organization — 2026-10-12
+
+Both concrete indexers now extend an abstract `OpenSearchService` implementing
+`IndexService`. The base owns URL construction and HTTP writes. The state
+indexer adds external-version parameters and catches/logs recognized conflicts;
+the record indexer propagates every write error. The composite implements the
+same interface and still runs state before history.
+
+Moved replicator source files into `indexing/`, `publishing/`, `replication/`,
+and `source/`, keeping `main.ts` at the root. Updated Nest providers, imports in
+destination/checkpoint/G1 publisher/incremental tests and load helpers, the test
+reading guide, and the conflict rule in SPEC. Reviewed README without expanding it.
+
+Validation:
+
+- `npm run build` from `apps/replicator`: formatting, lint, typecheck, and
+  compilation passed.
+- `npm run format:check` from `apps/replicator`: passed after test updates.
+- `node --test test/*.test.mjs` from `apps/replicator`: all 31 tests passed.
+- Destination regression tests cover conflict logging, history rejection, and
+  Nest injection of both inherited indexers into the composite.
+- `git diff --check`: passed.
+- G1 was not rerun for this structural refactor; the preceding attempt remains
+  blocked by the unavailable Docker daemon.
+
+## Composite OpenSearch indexer and G1 history coverage — 2026-10-12
+
+Ticket #47 adds an append-only `shipment-records` index alongside the versioned
+shipment projection. A composite indexer completes both writes before broker
+publication; history preserves every successfully appended payload, including
+replays. G1 now scans history in 500-document scroll pages, compares every source
+event ID and payload, and requires separate history documents for its crash event.
+
+Validation:
+
+- `npm run build` from `apps/replicator`: formatting, lint, typecheck, and
+  compilation passed.
+- `node --test test/*.test.mjs` from `apps/replicator`: all 29 tests passed.
+- `node --test scripts/verification/outcomes.test.mjs scripts/verification/environment.test.mjs`:
+  all 19 tests passed, covering a 10,001-document scan, cleanup after partial
+  responses or request failures, malformed pages, missing events, payload
+  corruption, and replay evidence. Partial pages are saved before validation
+  so failures retain evidence and their scroll ID can be released.
+- `node scripts/verification/verify-g1.mjs`: exit 1 before services started.
+  WSL could not reach its Docker daemon; application build, final comparisons,
+  log collection, and cleanup could not complete. The saved run is
+  `logs/verify-g1/2026-10-12T08-47-53.546Z-c50165d8-fa5a-4a1b-9c3b-bd1fbb5b1209/`.
+  This attempt establishes neither an updated G1 PASS nor G2.
+- `git diff --check`: passed. `.air/` remains ignored.
+
+
 ## Shared seed-size environment — 2026-09-30
 
 Committed the preceding G1 work as `7574d8406f91e6ec4cde0dbb647b2dc648792878`
