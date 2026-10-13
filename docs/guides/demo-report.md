@@ -37,7 +37,7 @@ correctness or exactly-once business effects. Valid duplicate notices are counte
 and allowed, since replay can occur when resuming unfinished work.
 
 The report observes a completed demo. It does not inject a crash or establish
-recovery from failures; [G1](../G1.md) checks replicator crash recovery separately.
+recovery from failures; [G1](../../G1.md) checks replicator crash recovery separately.
 Keep one serial source writer during the run. Extra manual traffic changes the
 expected final count and fails `generatedEvents`.
 

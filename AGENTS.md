@@ -1,6 +1,6 @@
 # Instructions for coding agents
 
-Read `SPEC.md` before editing. It defines the current operating rules; `docs/project-brief-en.md` summarizes the broader problem, and `docs/optio-assignment-original-ka.md` is the original assignment. Work on one small requested task at a time and report files changed, commands run, and actual results.
+Read `SPEC.md` before editing. It defines the current operating rules; `docs/project/project-brief-en.md` summarizes the broader problem, and `docs/project/optio-assignment-original-ka.md` is the original assignment. Work on one small requested task at a time and report files changed, commands run, and actual results.
 
 - Readability is the number one code-quality priority. The developer must be able to read and verify every change. Prefer small, clearly named functions, explicit control flow, descriptive variables, and whitespace between logical steps. Avoid dense expressions, long functions, deeply nested callbacks, and unnecessary abstractions. Review new code and rewrites for readability before presenting them; formatting alone is not enough.
 - Documentation readability: in every commit, review README.md and SPEC.md for concise, readable prose. Keep the README breezy and focused on configuring, running, and playing with the code. Keep SPEC.md focused on operating rules. Move long explanations, reference tables, evidence details, and troubleshooting into focused documents and link to them instead of expanding these files.

@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readPollingOptions } from '../dist/polling-options.js';
+import { readPollingOptions } from '../dist/replication/polling-options.js';
 import { eventsFrom, setupLoad } from './load-test-helpers.mjs';
 
 test('polling processes new events while an initial event is still in progress', async (t) => {

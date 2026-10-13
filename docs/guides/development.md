@@ -1,6 +1,6 @@
 # Detailed usage and development
 
-For a quick start, see the [README](../README.md). The [specification](../SPEC.md) defines the source contract and implementation boundaries; [validation history](validation-history.md) records observed runs.
+For a quick start, see the [README](../../README.md). The [specification](../../SPEC.md) defines the source contract and implementation boundaries; [validation history](../verification/validation-history.md) records observed runs.
 
 ## Event format
 
@@ -28,7 +28,7 @@ Passwords initialize new PostgreSQL/RabbitMQ volumes only; editing `.env` does n
 
 ### Configuration reference
 
-The checked-in [`.env.example`](../.env.example) is the full Compose reference. `DEMO_SEED_SHIPMENTS` defaults to 4000 and controls demo seeding. `DEMO_INCREMENTAL_EVENTS` (500) and `DEMO_INCREMENTAL_RATE` (20) control the automatic traffic in `make run`. G1 uses `G1_SEED_SHIPMENTS` in `.env.verify`. [The log guide](run-logs.md) covers saved runs. `POLL_INTERVAL_MS` defaults to 1000 milliseconds; `POLL_MAX_EMPTY` defaults to 3 and starts counting only after incremental rows arrive. `POSTGRES_PORT`, `OPENSEARCH_PORT`, `DASHBOARDS_PORT`, `RABBITMQ_PORT`, and `RABBITMQ_MANAGEMENT_PORT` select host ports. The separate [`.env.verify`](../.env.verify) sets the G1 fixture, crash event, and wait timeout. Exported environment variables can override these file values.
+The checked-in [`.env.example`](../../.env.example) is the full Compose reference. `DEMO_SEED_SHIPMENTS` defaults to 4000 and controls demo seeding. `DEMO_INCREMENTAL_EVENTS` (500) and `DEMO_INCREMENTAL_RATE` (20) control the automatic traffic in `make run`. G1 and G2 use their own seed, timeout, and incremental-size settings in `.env.verify`, with shared seed and timeout defaults. [The log guide](run-logs.md) covers saved runs. `POLL_INTERVAL_MS` defaults to 1000 milliseconds; `POLL_MAX_EMPTY` defaults to 3 and starts counting only after incremental rows arrive. `POSTGRES_PORT`, `OPENSEARCH_PORT`, `DASHBOARDS_PORT`, `RABBITMQ_PORT`, and `RABBITMQ_MANAGEMENT_PORT` select host ports. The separate [`.env.verify`](../../.env.verify) sets both verification fixtures, crash targets, incremental sizes, and wait timeouts. Exported environment variables can override these file values.
 
 ## Run and inspect shipments
 
@@ -44,7 +44,7 @@ make stop SERVICES="replicator consumer"
 
 `make up` does not seed or rebuild images. `make restart` retains checkpoint and receipt volumes. `make down` removes containers while retaining volumes.
 
-The following is the shipment workflow. Expected results for a fresh seed are 10,000 published events and 4,000 shipment documents. The [validation history](validation-history.md) records a successful run.
+The following is the shipment workflow. Expected results for a fresh seed are 10,000 published events and 4,000 shipment documents. The [validation history](../verification/validation-history.md) records a successful run.
 
 From the repository root:
 
@@ -70,7 +70,7 @@ Initial batch 10: rows=1000 firstId=9001 lastId=10000 total=10000
 Initial load complete: rows=10000 batches=10
 ```
 
-The older [shipment validation](validation-history.md#shipment-validation--2026-09-28) records the earlier sequential implementation; its log prefix and lifecycle predate the current rule.
+The older [shipment validation](../verification/validation-history.md#shipment-validation--2026-09-28) records the earlier sequential implementation; its log prefix and lifecycle predate the current rule.
 
 Inspect shipment 1 and its latest event (ID 3) across the three systems:
 
@@ -180,7 +180,7 @@ npm test --prefix apps/source-writer
 
 The source-writer tests check deterministic histories without PostgreSQL and use a fake query client to check bounded inserts and transaction handling. They do not check replication or failure gates. For local seeding, set the standard PostgreSQL environment variables and run `npm start --prefix apps/source-writer -- --shipments 4000`; use `--help` for usage. The CLI does not load `.env` itself.
 
-See the [test reading guide](../apps/replicator/test/README.md) for scenarios and commands for running individual test files.
+See the [test reading guide](../../apps/replicator/test/README.md) for scenarios and commands for running individual test files.
 
 The replicator tests compile TypeScript and use mocked clients to inspect bounded reads, waiting, cleanup, destination errors, JSON fields, and publication confirmation. They are not automated pipeline or failure-gate checks.
 
@@ -209,4 +209,4 @@ This is a concurrent initial-load and finite-polling POC, not a throughput bench
 
 Indexing and publication are separate operations. The queue and events are non-durable/non-persistent; the consumer uses manual acknowledgement and persistent receipt checks. A crash between receipt commit and console output can still omit a normal log. Broker confirmation is not evidence of consumer logging or atomic delivery to both destinations.
 
-Durable SQLite checkpoints live in the dedicated `replicator-state` volume, separate from PostgreSQL. One replicator process owns that volume. `make verify` runs the isolated G1 interruption check described in the README; G2–G5 remain unimplemented. The consumer owns separate receipts in `consumer-state`, using one conflict-aware insert per event; it never shares the replicator checkpoint. There is no automatic retry/reconnect policy, DLQ, or operator UI. Polling and infrastructure health checks are not delivery guarantees.
+Durable SQLite checkpoints live in the dedicated `replicator-state` volume, separate from PostgreSQL. One replicator process owns that volume. `make verify` runs the isolated G1 and scheduled G2 crash scenarios described in the README; `make verify-g1` and `make verify-g2` run them individually. The complete G2 epic and G3–G5 remain outside scope. The consumer owns separate receipts in `consumer-state`, using one conflict-aware insert per event; it never shares the replicator checkpoint. There is no automatic retry/reconnect policy, DLQ, or operator UI. Polling and infrastructure health checks are not delivery guarantees.

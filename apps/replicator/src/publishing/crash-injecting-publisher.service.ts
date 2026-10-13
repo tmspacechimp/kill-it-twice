@@ -1,16 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import { PublisherService } from './publisher.service.js';
-import type { ShipmentEvent } from './shipment-event.js';
+import type { ShipmentEvent } from '../source/shipment-event.js';
 
-// Selected only for G1's first run; restart uses the normal publisher.
+// One crash target per verification process; G1/G2 harnesses control restarts.
 @Injectable()
-export class G1PublisherService extends PublisherService {
-  private readonly crashEventId = Number(process.env.G1_CRASH_EVENT_ID);
+export class CrashInjectingPublisherService extends PublisherService {
+  private readonly crashEventId = Number(process.env.CRASH_EVENT_ID);
 
   constructor() {
     super();
     if (!Number.isInteger(this.crashEventId) || this.crashEventId < 1) {
-      throw new Error('G1_CRASH_EVENT_ID must be a positive integer');
+      throw new Error('CRASH_EVENT_ID must be a positive integer');
     }
   }
 
