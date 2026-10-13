@@ -1,5 +1,154 @@
 # Validation history
 
+## Documentation organization — 2026-10-13
+
+Grouped the eleven documents into `docs/guides/`, `docs/verification/`, and
+`docs/project/`, with `docs/README.md` as the index. The root README, SPEC, G1/G2
+proofs, script guides, agent instructions, and Make help now use the moved paths.
+Original assignment text and recorded results were retained; historical file
+paths in older run descriptions remain as recorded.
+
+Validation: inspected all 107 local Markdown links across 20 documents; none
+were broken. `wsl --exec make help` printed the new command-guide location,
+and `git diff --check` passed. Application tests were not rerun for these
+documentation moves and link changes.
+
+## Organized verification and command documentation — 2026-10-13
+
+G1 and G2 now live under `scripts/verification/g1/` and `g2/`, each with its
+scenario, command entry point, and tests in matching `verify-g1.mjs` /
+`verify-g2.mjs` files. The separate wrapper files were removed. Common helpers
+and their tests moved to `shared/`; the combined runner and Make targets point
+to the new paths. Scenario behavior and replicator operating rules are unchanged.
+
+README now links configuration details instead of repeating the verification
+environment block. The [Make command guide](../guides/make-commands.md) explains all
+targets and options; `make help` points to it. Root-level [G2.md](../../G2.md)
+explains the repeated-crash proof and accurately cites the earlier scaled run.
+G1's written step order was corrected to put restart traffic before recreation.
+SPEC and the script guides link the new documentation.
+
+Validation:
+
+- `node --test scripts/verification/*.test.mjs scripts/verification/g1/*.test.mjs scripts/verification/g2/*.test.mjs scripts/verification/shared/*.test.mjs scripts/logging/run-evidence.test.mjs scripts/logging/collector.test.mjs`:
+  all 46 tests passed, including importing each scenario without executing its
+  CLI and checking the combined runner's new directory paths.
+- `wsl --exec make -n verify verify-g1 verify-g2 NODE=node.exe`: all three
+  targets resolved to their intended entry points.
+- `node scripts/verification/verify.mjs` with G1_SEED_SHIPMENTS=0 and
+  G2_SEED_SHIPMENTS=0: both command entry points rejected invalid configuration
+  before Docker startup; G2 still ran after G1 failed, and the combined exit was
+  the expected 1. This checks routing and failure propagation, not recovery.
+- Relative-link inspection: all links resolved in the eight reviewed README,
+  specification, proof, and command/verification guide documents.
+- Prettier formatted the moved scripts; `git diff --check` passed.
+
+Docker recovery scenarios were not rerun for this documentation and directory
+reorganization. The recorded process-crash evidence below remains the evidence
+for recovery behavior.
+
+## Matching scenarios and incremental G2 crashes — 2026-10-13
+
+Both verification scenarios now expose six readable numbered steps in matching
+`g1-scenario.mjs` and `g2-scenario.mjs` modules. Their matching `verify-g1.mjs`
+and `verify-g2.mjs` entry points share evidence and cleanup through
+`run-scenario.mjs`, settings through `configuration.mjs`, and cursor/delivery
+checks through `scenario-checks.mjs`. `make verify` runs both sequentially and
+returns nonzero if either fails; interruption stops the combined run.
+
+`.env.verify` uses DEFAULT_SEED_SHIPMENTS and DEFAULT_WAIT_TIMEOUT_MS, referenced
+by each scenario's own variables. Each also has an independent incremental
+event count. G2's default `[2048,2048,12048]` targets both initial and incremental
+readers with 6,000-row traffic batches. Cursor checks allow the other reader's
+concurrent progress while requiring the crashed reader to leave the target
+uncheckpointed. Final traffic is written while stopped before restarting,
+avoiding an idle-stop race without changing the replicator's polling rules.
+
+The shared hook is now `CrashInjectingPublisherService` in
+`crash-injecting-publisher.service.ts`. Both harnesses translate their selected
+target to the general CRASH_EVENT_ID setting. The Nest provider and focused tests
+were renamed together. README and SPEC were reviewed and updated; the G1/G2
+guides, log guide, development guide, script guides, and submission notes describe
+the new commands, configuration, and evidence.
+
+Validation:
+
+- `npm run build` from `apps/replicator`: formatting, lint, typecheck, and
+  compilation passed; a subsequent format check also passed.
+- `node --test test/crash-injecting-publisher.test.mjs` from `apps/replicator`:
+  all three confirmation-before-kill tests passed.
+- `node --test scripts/verification/*.test.mjs scripts/logging/run-evidence.test.mjs scripts/logging/collector.test.mjs`:
+  all 46 tests passed. Includes independent settings and shared references,
+  initial/incremental and repeated crash targets, completed first-traffic edge
+  cases, exact replay counts, destination mismatches, and combined-run failure
+  and interruption behavior. Fixtures do not replace actual SIGKILL evidence.
+- `wsl --exec make -n verify verify-g1 verify-g2 NODE=node.exe`: all three targets
+  resolved to their intended entry points.
+- `git diff --check`: passed.
+- Combined `make verify NODE=node.exe` with DEFAULT_SEED_SHIPMENTS=1001,
+  DEFAULT_WAIT_TIMEOUT_MS=600000, G1_INCREMENTAL_EVENTS=30,
+  G2_INCREMENTAL_EVENTS=600, and G2_CRASH_EVENT_IDS=[2048,2048,2700]: exit 0.
+  G1 passed with 2,563 events, 1,021 shipment documents, and one replay. G2 then
+  passed all three scheduled crashes and verified 3,703 events, 1,401 shipment
+  documents, three duplicate notices, and 3,706 history deliveries. Event 2048
+  appeared three times in history; event 2700 appeared twice. The incremental
+  crash retained initialId=2297, initialDone=0, incrementalId=2699, and boundary
+  2503: incremental processing interrupted while initial loading remained active.
+  Final restart resumed initial event 2298 and completed both cursors. Both
+  scenarios collected evidence and cleaned up successfully. G1 began before
+  the final traffic-before-restart adjustment; the individual G1 check below
+  validates that final ordering. This scaled run does not claim an executed
+  22,000-event default G2 run. Evidence:
+  `logs/verify-g1/2026-10-12T20-31-33.303Z-c090ca0f-812c-4e7d-9aee-2733fbfbca2b/`
+  and `logs/verify-g2/2026-10-12T20-38-53.300Z-1367625b-b95d-487b-b00c-1a38a458e7d1/`.
+- Individual `make verify-g1 NODE=node.exe` with G1_SEED_SHIPMENTS=20,
+  G1_WAIT_TIMEOUT_MS=60000, G1_INCREMENTAL_EVENTS=30, and G1_CRASH_EVENT_ID=32:
+  PASS against the final code. It verified 110 source events, 40 shipment
+  documents, one duplicate notice, and 111 history deliveries. The retained
+  initial cursor was 31, and restart began at 32. New traffic was generated
+  while stopped before replacement. Evidence collection and isolated cleanup
+  succeeded. The saved configuration confirms independent G1 seed and timeout
+  overrides. Evidence:
+  `logs/verify-g1/2026-10-12T20-40-21.655Z-03016723-b732-401c-b0dc-119e1a834973/`.
+
+## Scheduled G2 replicator crashes — 2026-10-12
+
+Ticket #46 adds `make verify-g2`, sharing G1's isolated environment and crash
+hook while the harness owns `[2048,2048,4096]`. Every run validates the retained
+boundary and saved cursors, consumer handling and preceding replays before
+installing the next target. The final run checks complete consumer payload
+coverage, exact latest shipment documents and total count, and full event history
+with a separate replay for each scheduled crash. The operating rules remain
+unchanged; the [G2 guide](g2-verification.md) documents the case's limits.
+
+Validation:
+
+- `node --test scripts/verification/*.test.mjs scripts/logging/run-evidence.test.mjs scripts/logging/collector.test.mjs`:
+  all 36 tests passed. Cases include missing crashes, lost/checkpointed progress,
+  missing repeated duplicate notices, repeated normal handling, extra shipment
+  documents, and evidence collection/write failures.
+- `wsl --exec make -n verify-g2 NODE=node.exe`: resolved the new entry point.
+- `git diff --check`: passed.
+- `node scripts/verification/verify-g2.mjs`: the fresh default-size run passed
+  `[2048,2048,4096]`. All three crashes exited 137 with initial cursors
+  2047, 2047, and 4095; every restart retained boundary 10,000. The final run
+  handled 10,009 events normally once each, observed three duplicate notices,
+  and matched all 4,003 shipment documents with no extras. History contained
+  10,012 deliveries: event 2048 appeared three times and event 4096 twice.
+  The final checkpoint completed the initial load and reached incremental ID
+  10,009. Evidence collection and isolated cleanup succeeded. Evidence:
+  `logs/verify-g2/2026-10-12T19-04-34.726Z-b688799c-a847-4fbc-a344-43dbb96acb04/`.
+- `G1_SEED_SHIPMENTS=1001 node scripts/verification/verify-g1.mjs`: PASS with
+  2,521 source events, 1,007 shipment documents, one duplicate notice, and 2,522
+  history documents. Restart resumed event 2048 from cursor 2047; collection and
+  isolated cleanup succeeded. Evidence:
+  `logs/verify-g1/2026-10-12T19-06-17.972Z-be9b4ebe-c285-4186-97ad-587d103e3936/`.
+- The first default-size G2 attempt correctly returned FAIL after a WSL
+  log-following process exited unexpectedly (3221225786). The first crash had
+  validated, but collection failure prevented the next container replacement
+  and any PASS claim. Cleanup succeeded and the failed evidence remains under
+  `logs/verify-g2/2026-10-12T19-01-18.362Z-f5d332d7-dc2f-428b-9ec6-dc6e818097c2/`.
+
 ## OpenSearch inheritance and source organization — 2026-10-12
 
 Both concrete indexers now extend an abstract `OpenSearchService` implementing

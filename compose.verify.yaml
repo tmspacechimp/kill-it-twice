@@ -1,4 +1,4 @@
-# Standalone G1 environment: no host ports, shared image tags, or demo volumes.
+# Standalone G1/G2 environment: no host ports, shared image tags, or demo volumes.
 services:
   postgres:
     image: postgres:17
@@ -41,7 +41,7 @@ services:
       PGDATABASE: client_source
       PGUSER: source
       PGPASSWORD: g1-local
-      SEED_SHIPMENTS: ${G1_SEED_SHIPMENTS-4000}
+      SEED_SHIPMENTS: ${VERIFY_SEED_SHIPMENTS:?Verification harness must supply its seed size}
   replicator:
     build: ./apps/replicator
     # Node must not be PID 1: Linux otherwise ignores its self-SIGKILL.
@@ -49,7 +49,7 @@ services:
     environment:
       <<: *source
       CHECKPOINT_PATH: /state/progress.sqlite
-      G1_CRASH_EVENT_ID: ${G1_CRASH_EVENT_ID:-}
+      CRASH_EVENT_ID: ${CRASH_EVENT_ID:-}
       OPENSEARCH_URL: http://opensearch:9200
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_USER: local

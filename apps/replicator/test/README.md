@@ -7,7 +7,7 @@ setup only supplies rows and records calls.
 Source files are grouped by responsibility: `source/` contains the event contract
 and PostgreSQL reader, `replication/` contains loading, polling, and checkpoints,
 `indexing/` contains the index contract and OpenSearch indexers, and `publishing/`
-contains the RabbitMQ publisher and G1 crash hook. `main.ts` wires them together.
+contains the RabbitMQ publisher and shared crash-injection hook. `main.ts` wires them together.
 
 Both OpenSearch indexers extend the abstract `OpenSearchService`, which implements
 `IndexService` and shares HTTP writes. Only the state indexer adds external-version
@@ -46,4 +46,4 @@ node --test apps/replicator/test/incremental.test.mjs
 These tests establish the specified startup boundary and finite polling flow
 with fake services and real checkpoint storage. They do not establish
 concurrent-writer safety or the assignment's failure gates. `make verify` runs
-the separate G1 check against real Docker services and an actual SIGKILL.
+the separate G1 and G2 scenarios against real Docker services and actual SIGKILLs.

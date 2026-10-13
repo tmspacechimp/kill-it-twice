@@ -42,4 +42,4 @@ The UI need not have production-grade visual polish.
 
 ## Technology constraints
 
-The platform commonly uses NestJS, Angular, RabbitMQ, Redis, Elasticsearch, Docker, S3, ClickHouse, and Apache NiFi, but equivalent tools may be used when appropriate. The selected implementation and its phased scope are recorded in [`../SPEC.md`](../SPEC.md); this brief describes the broader target, not a claim that every requirement is already implemented.
+The platform commonly uses NestJS, Angular, RabbitMQ, Redis, Elasticsearch, Docker, S3, ClickHouse, and Apache NiFi, but equivalent tools may be used when appropriate. The selected implementation and its phased scope are recorded in [SPEC.md](../../SPEC.md); this brief describes the broader target, not a claim that every requirement is already implemented.

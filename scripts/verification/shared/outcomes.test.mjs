@@ -97,31 +97,64 @@ test('history coverage preserves duplicates across pages and reports distinct ev
     [historyDocument(firstEvent, 'c'), historyDocument(firstEvent, 'd')],
   ];
   assert.deepEqual(assertShipmentRecordCoverage(sourceEvents, batches, firstEvent.id), {
-    documents: 4, events: 2, duplicateDeliveries: 2, crashEventDeliveries: 3,
+    documents: 4,
+    events: 2,
+    duplicateDeliveries: 2,
+    crashEventDeliveries: 3,
   });
 });
 
 test('duplicate history documents cannot disguise a missing source event', () => {
   const documents = [historyDocument(firstEvent, 'a'), historyDocument(firstEvent, 'b')];
   assert.equal(documents.length, sourceEvents.length);
-  assert.throws(() => assertShipmentRecordCoverage(sourceEvents, [documents], firstEvent.id),
-    /missing source event 10001/);
+  assert.throws(
+    () => assertShipmentRecordCoverage(sourceEvents, [documents], firstEvent.id),
+    /missing source event 10001/,
+  );
 });
 
 test('history coverage rejects unknown IDs and corrupted duplicate payloads', () => {
   const valid = [historyDocument(firstEvent, 'a'), historyDocument(secondEvent, 'b')];
   const unknown = historyDocument({ ...firstEvent, id: 999 }, 'c');
-  assert.throws(() => assertShipmentRecordCoverage(sourceEvents, [[...valid, unknown]], firstEvent.id),
-    /unknown event 999/);
+  assert.throws(
+    () => assertShipmentRecordCoverage(sourceEvents, [[...valid, unknown]], firstEvent.id),
+    /unknown event 999/,
+  );
   const corrupted = historyDocument({ ...firstEvent, status: 'cancelled' }, 'c');
-  assert.throws(() => assertShipmentRecordCoverage(sourceEvents, [[...valid, corrupted]], firstEvent.id),
-    /Wrong history payload for event 72/);
+  assert.throws(
+    () => assertShipmentRecordCoverage(sourceEvents, [[...valid, corrupted]], firstEvent.id),
+    /Wrong history payload for event 72/,
+  );
 });
 
 test('history coverage requires distinct documents proving the crash-event replay', () => {
   const valid = [historyDocument(firstEvent, 'a'), historyDocument(secondEvent, 'b')];
-  assert.throws(() => assertShipmentRecordCoverage(sourceEvents, [valid], firstEvent.id),
-    /must contain a replay/);
-  assert.throws(() => assertShipmentRecordCoverage(sourceEvents, [[...valid, valid[0]]], firstEvent.id),
-    /scan repeated document a/);
+  assert.throws(
+    () => assertShipmentRecordCoverage(sourceEvents, [valid], firstEvent.id),
+    /must contain a replay/,
+  );
+  assert.throws(
+    () => assertShipmentRecordCoverage(sourceEvents, [[...valid, valid[0]]], firstEvent.id),
+    /scan repeated document a/,
+  );
+});
+
+test('history coverage requires a separate replay for every repeated scheduled crash', () => {
+  const documents = [
+    historyDocument(firstEvent, 'a'),
+    historyDocument(secondEvent, 'b'),
+    historyDocument(firstEvent, 'c'),
+    historyDocument(secondEvent, 'd'),
+  ];
+  const schedule = [firstEvent.id, firstEvent.id, secondEvent.id];
+  assert.throws(
+    () => assertShipmentRecordCoverage(sourceEvents, [documents], schedule),
+    /every scheduled crash/,
+  );
+  documents.push(historyDocument(firstEvent, 'e'));
+  const result = assertShipmentRecordCoverage(sourceEvents, [documents], schedule);
+  assert.deepEqual(result.crashEventDeliveries, [
+    { eventId: firstEvent.id, deliveries: 3, requiredReplays: 2 },
+    { eventId: secondEvent.id, deliveries: 2, requiredReplays: 1 },
+  ]);
 });

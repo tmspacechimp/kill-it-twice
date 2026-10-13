@@ -21,7 +21,7 @@ replicator and consumer, and generates incremental events after the replicator
 has captured its startup boundary. It prints the log directory and collects
 until Ctrl+C. Use `make logs` in another terminal to watch replication progress.
 After replication finishes, a report is generated with checks, counts, and timings;
-see [how the demo report works](docs/demo-report.md).
+see [how the demo report works](docs/guides/demo-report.md).
 Existing data and checkpoints are kept; the seed setting applies to an empty source.
 
 To start from scratch in one command:
@@ -48,7 +48,8 @@ count is **event rows**, and rate is events per second.
 
 Inspect with `make counts`, `make history ID=1`, `make shipment ID=1`, or
 [Dashboards Discover](http://localhost:5601/app/discover). `make down` removes
-containers and keeps data.
+containers and keeps data. The [Make command guide](docs/guides/make-commands.md)
+explains every command, its options, and when to use it.
 
 ## Check crash recovery
 
@@ -56,25 +57,22 @@ containers and keeps data.
 make verify
 ```
 
-G1 uses an isolated project and records the crash, checkpoint recovery, duplicate
-delivery, and destination comparisons. Configure it separately in `.env.verify`:
+This runs G1 and G2 sequentially in separate isolated projects. Use
+`make verify-g1` or `make verify-g2` to run one scenario. Configure seed sizes,
+incremental batches, timeouts, and crash targets in [.env.verify](.env.verify);
+the [verification guide](scripts/verification/README.md) links the settings and
+evidence details. PASS requires all checks and cleanup to succeed.
 
-```dotenv
-G1_SEED_SHIPMENTS=4000
-G1_CRASH_EVENT_ID=2048
-G1_WAIT_TIMEOUT_MS=600000
-```
-
-G1 prints PASS only after its checks and cleanup succeed. G2-G5 and the operator
-UI are outside the implemented scope. Its saved summary records recovery results;
-see [how the G1 report works](docs/g1-report.md) for checks, counts, and timing.
-[G1.md](G1.md) explains the guarantee.
+[G1.md](G1.md) explains single-crash recovery; [G2.md](G2.md) explains repeated
+initial and incremental crashes. G2 covers a scheduled replicator-crash case;
+consumer-crash recovery, G3-G5, and the operator UI remain outside scope.
 
 ## Logs and manual runs
 
-Demo logs live in `logs/demo/<run-id>/`, G1 evidence in
-`logs/verify-g1/<run-id>/`. Start with `summary.json`; delete old run directories
-when finished with them. Logs are ignored by Git. [Log guide](docs/run-logs.md)
+Demo logs live in `logs/demo/<run-id>/`, verification evidence in
+`logs/verify-g1/<run-id>/` and `logs/verify-g2/<run-id>/`.
+Start with `summary.json`; delete old run directories
+when finished with them. Logs are ignored by Git. [Log guide](docs/guides/run-logs.md)
 covers the evidence files and retention.
 
 For a manual run:
@@ -89,6 +87,7 @@ make logs
 ```
 
 These commands give you control over each step and retain existing data.
-See [development.md](docs/development.md) for inspection, custom configuration,
+See [development.md](docs/guides/development.md) for inspection, custom configuration,
 and troubleshooting, [scripts](scripts/README.md) for the command code,
-or [submission notes](docs/submission-notes.md) for tradeoffs.
+or [submission notes](docs/project/submission-notes.md) for tradeoffs.
+The [documentation index](docs/README.md) lists all guides and project references.
