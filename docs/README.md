@@ -1,6 +1,7 @@
 # Documentation
 
 Start with the [repository README](../README.md) to run the demo.
+Its [data-flow diagram](../README.md#data-flow) shows the applications and services.
 [SPEC.md](../SPEC.md) defines the current operating rules; the project documents
 below describe the broader assignment and the implemented scope.
 
