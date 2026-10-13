@@ -1,5 +1,17 @@
 # Validation history
 
+## Demo import after verification reorganization — 2026-10-13
+
+The verification move left `scripts/demo/demo-report.mjs` importing the old
+`verification/outcomes.mjs` path. `make run-fresh` completed its reset but failed
+to load the subsequent demo command before services started. The demo report
+now imports `verification/shared/outcomes.mjs`.
+
+`node --test scripts/demo/*.test.mjs`: nine tests passed; the optional Docker
+smoke test was skipped. All 45 relative imports across 29 script files resolved,
+and `git diff --check` passed. README and SPEC were reviewed; operating behavior
+is unchanged. The destructive reset and full Docker demo were not rerun.
+
 ## Documentation organization — 2026-10-13
 
 Grouped the eleven documents into `docs/guides/`, `docs/verification/`, and

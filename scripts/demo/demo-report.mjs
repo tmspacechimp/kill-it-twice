@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { setTimeout } from 'node:timers/promises';
-import { assertConsumerCoverage, assertShipmentDocuments, latestShipmentEvents } from '../verification/outcomes.mjs';
+import {
+  assertConsumerCoverage,
+  assertShipmentDocuments,
+  latestShipmentEvents,
+} from '../verification/shared/outcomes.mjs';
 
 const RECEIPTS_QUERY = `
   const { DatabaseSync } = require('node:sqlite');
