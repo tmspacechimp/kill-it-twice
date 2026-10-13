@@ -4,6 +4,22 @@ A shipment replication demo: PostgreSQL event history goes through a NestJS
 replicator into OpenSearch and RabbitMQ. A separate consumer logs events and
 detects duplicates. [SPEC.md](SPEC.md) describes the design.
 
+## Data flow
+
+```mermaid
+flowchart LR
+    Writer["Source writer"] -->|"seed and append events"| PG["PostgreSQL"]
+    PG -->|"bounded reads"| R["NestJS replicator"]
+    R -->|"shipment state and event history"| OS["OpenSearch"]
+    R -->|"after indexing; await confirmation"| MQ["RabbitMQ"]
+    MQ --> C["Consumer: event and duplicate logs"]
+    D["Dashboards"] -->|"query shipment state"| OS
+```
+
+The replicator reads the source through concurrent initial and incremental
+readers. It keeps checkpoints in its own SQLite volume; the consumer keeps
+duplicate-detection receipts in a separate SQLite volume.
+
 ## Try it
 
 You need Docker with Linux containers, Compose v2, GNU Make, and Node.js 24.
