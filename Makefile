@@ -9,7 +9,7 @@ TAIL ?= 30
 
 .PHONY: help init build postgres infra dashboards up restart stop down logs status
 .PHONY: seed generate append history shipment counts queue check-id
-.PHONY: verify run run-fresh fresh-run reset
+.PHONY: verify verify-g1 verify-g2 run run-fresh fresh-run reset
 
 run:
 	@$(NODE) scripts/demo/run-demo.mjs
@@ -21,10 +21,17 @@ run-fresh:
 	@$(MAKE) run
 
 verify:
-	@$(NODE) scripts/verification/verify-g1.mjs
+	@$(NODE) scripts/verification/verify.mjs
+
+verify-g1:
+	@$(NODE) scripts/verification/g1/verify-g1.mjs
+
+verify-g2:
+	@$(NODE) scripts/verification/g2/verify-g2.mjs
 
 help:
 	@echo "Demo: make init, then make run"
+	@echo "Command explanations and examples: docs/make-commands.md"
 	@echo "init        Create .env if missing; then set both passwords"
 	@echo "build       Build all apps (or SERVICES='replicator consumer')"
 	@echo "postgres    Start PostgreSQL and wait until healthy"
@@ -43,7 +50,9 @@ help:
 	@echo "shipment    Show indexed current state for ID=1"
 	@echo "counts      Show source event/shipment counts and indexed count"
 	@echo "queue       Show RabbitMQ queue counts"
-	@echo "verify      Run isolated G1 kill-and-resume check (requires Node.js 24)"
+	@echo "verify      Run G1 and G2 scenarios sequentially (requires Node.js 24)"
+	@echo "verify-g1   Verify a single replicator crash and resume"
+	@echo "verify-g2   Verify scheduled replicator crashes and harmless replay"
 	@echo "restart     Restart replicator (or SERVICES='consumer')"
 	@echo "stop        Stop all containers (or SERVICES='replicator consumer')"
 	@echo "down        Remove containers, retaining volumes"

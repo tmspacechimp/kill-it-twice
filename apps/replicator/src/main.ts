@@ -10,7 +10,7 @@ import { CompositeIndexerService } from './indexing/composite-indexer.service.js
 import { StateIndexerService } from './indexing/state-indexer.service.js';
 import { RecordIndexerService } from './indexing/record-indexer.service.js';
 import { PublisherService } from './publishing/publisher.service.js';
-import { G1PublisherService } from './publishing/g1-publisher.service.js';
+import { CrashInjectingPublisherService } from './publishing/crash-injecting-publisher.service.js';
 import { CheckpointService } from './replication/checkpoint.service.js';
 
 @Module({
@@ -24,7 +24,7 @@ import { CheckpointService } from './replication/checkpoint.service.js';
     RecordIndexerService,
     {
       provide: PublisherService,
-      useClass: process.env.G1_CRASH_EVENT_ID ? G1PublisherService : PublisherService,
+      useClass: process.env.CRASH_EVENT_ID ? CrashInjectingPublisherService : PublisherService,
     },
     CheckpointService,
   ],

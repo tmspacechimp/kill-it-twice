@@ -59,9 +59,7 @@ export function assertShipmentDocuments(expectedShipments, documents) {
 }
 
 export function assertShipmentRecordCoverage(sourceEvents, documentBatches, crashEventId) {
-  const expectedById = new Map(
-    sourceEvents.map((event) => [event.id, normalizeTimestamp(event)]),
-  );
+  const expectedById = new Map(sourceEvents.map((event) => [event.id, normalizeTimestamp(event)]));
   const deliveriesById = new Map();
   const documentIds = new Set();
   for (const documents of documentBatches) {
@@ -72,7 +70,8 @@ export function assertShipmentRecordCoverage(sourceEvents, documentBatches, cras
       const eventId = document._source?.id;
       assert.ok(expectedById.has(eventId), 'OpenSearch history contains unknown event ' + eventId);
       assert.deepEqual(
-        document._source, expectedById.get(eventId),
+        document._source,
+        expectedById.get(eventId),
         'Wrong history payload for event ' + eventId,
       );
       deliveriesById.set(eventId, (deliveriesById.get(eventId) ?? 0) + 1);
@@ -82,14 +81,26 @@ export function assertShipmentRecordCoverage(sourceEvents, documentBatches, cras
   for (const eventId of expectedById.keys()) {
     assert.ok(deliveriesById.has(eventId), 'OpenSearch history is missing source event ' + eventId);
   }
-  assert.ok(
-    deliveriesById.get(crashEventId) >= 2,
-    'OpenSearch history must contain a replay of crash event ' + crashEventId,
-  );
+  const schedule = Array.isArray(crashEventId) ? crashEventId : [crashEventId];
+  const requiredReplays = new Map();
+  for (const id of schedule) requiredReplays.set(id, (requiredReplays.get(id) ?? 0) + 1);
+  const crashDeliveries = [];
+  for (const [id, replays] of requiredReplays) {
+    const deliveries = deliveriesById.get(id) ?? 0;
+    assert.ok(
+      deliveries >= replays + 1,
+      'OpenSearch history must contain a replay of crash event ' +
+        id +
+        ' for every scheduled crash',
+    );
+    crashDeliveries.push({ eventId: id, deliveries, requiredReplays: replays });
+  }
   return {
     documents: documentIds.size,
     events: deliveriesById.size,
     duplicateDeliveries: documentIds.size - deliveriesById.size,
-    crashEventDeliveries: deliveriesById.get(crashEventId),
+    crashEventDeliveries: Array.isArray(crashEventId)
+      ? crashDeliveries
+      : deliveriesById.get(crashEventId),
   };
 }

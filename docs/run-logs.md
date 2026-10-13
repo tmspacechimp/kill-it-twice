@@ -1,6 +1,6 @@
 # Saved run logs
 
-Both commands print an absolute host path and create a new timestamp/UUID
+Demo and verification commands print an absolute host path and create a new timestamp/UUID
 directory. Runs never overwrite earlier logs. Compose cleanup keeps host logs;
 delete selected run directories when you no longer need them. Git ignores logs.
 
@@ -44,11 +44,12 @@ One-off containers are retained until their logs have been saved.
 
 ## G1 evidence
 
-G1 settings are independent of demo runs. Set G1_SEED_SHIPMENTS,
-G1_CRASH_EVENT_ID, and G1_WAIT_TIMEOUT_MS in `.env.verify`; exported variables
+Verification settings are independent of demo runs. Set G1_SEED_SHIPMENTS,
+G1_CRASH_EVENT_ID, G1_INCREMENTAL_EVENTS, and G1_WAIT_TIMEOUT_MS in `.env.verify`; exported variables
 override the file. The crash event must be above 1 and below the initial event
-count. The existing scenario generates two fixed batches of nine incremental
-events. [G1.md](../G1.md) explains the guarantee; the [G1 report guide](g1-report.md)
+count. G1 generates two batches of G1_INCREMENTAL_EVENTS rows. Seed and timeout
+references inherit DEFAULT_SEED_SHIPMENTS and DEFAULT_WAIT_TIMEOUT_MS; literal
+scenario values override them. [G1.md](../G1.md) explains the guarantee; the [G1 report guide](g1-report.md)
 explains the checks, result fields, and timing observations.
 
 Files under `logs/verify-g1/<run-id>/`:
@@ -62,7 +63,7 @@ Files under `logs/verify-g1/<run-id>/`:
 | services/*.log | Timestamped stdout/stderr; killed and replacement containers stay separate |
 | services/lifecycle.jsonl | Docker start, kill, exit, and removal times |
 | source-writer.jsonl | Output from removed one-off source writers |
-| checkpoints.jsonl | Durable SQLite reads before/after the kill and at completion; loaded startup log after restart |
+| checkpoints.jsonl | Durable SQLite reads after the kill and at completion; loaded checkpoints are in validation startup/restart files |
 | validation/ | Source boundaries, expected shipments, consumer events/duplicates, actual OpenSearch documents, discrepancies |
 | commands.jsonl | Successful and failed Docker command output |
 
@@ -71,10 +72,17 @@ message is not a new disk read, and neither is ordinary in-memory progress.
 G1 logs have no automatic rotation. A successful summary is written only after
 the existing checks, log collection, and cleanup succeed. No other gate is tested.
 
+## G2 evidence
+
+G2's scheduled-crash case uses the same evidence conventions under
+`logs/verify-g2/<run-id>/`, plus a saved crash schedule and observations for each
+crash and restart. The [G2 guide](g2-verification.md#retained-evidence) describes
+these files and the narrower scope of its PASS result.
+
 ## Incomplete collection
 
-Runs start as INCOMPLETE. Handled G1 interruption records INTERRUPTED; a failed
-run records FAIL. A hard kill or power loss can leave only the original status
+Runs start as INCOMPLETE. Handled verification interruption records INTERRUPTED;
+a failed run records FAIL. A hard kill or power loss can leave only the original status
 and logs flushed so far. Output still in a pipe or filesystem cache can be lost.
 Collection failures are reported and prevent a successful result; diagnostics
 are saved in `services/collection-errors.jsonl`. Event payloads may appear in logs.

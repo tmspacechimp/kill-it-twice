@@ -1,5 +1,6 @@
-import { executeDocker } from '../logging/docker.mjs';
+import { executeDocker } from '../../logging/docker.mjs';
 import { setTimeout } from 'node:timers/promises';
+import { DEFAULT_SEED_SHIPMENTS, DEFAULT_WAIT_TIMEOUT_MS } from './configuration.mjs';
 
 const CHECKPOINT_QUERY = `
   const { DatabaseSync } = require('node:sqlite');
@@ -11,33 +12,42 @@ const CHECKPOINT_QUERY = `
 
 // Docker commands and data collection only. Assertions belong to the scenario.
 export class VerificationEnvironment {
-  constructor(projectName, evidence) {
+  constructor(projectName, evidence, configuration = {}) {
     this.evidence = evidence;
     this.documentBatch = 0;
     this.projectName = projectName;
     this.crashEventId = '';
+    this.seedShipments = configuration.initialShipments ?? DEFAULT_SEED_SHIPMENTS;
   }
 
   compose(...arguments_) {
     const command = ['compose', '-f', 'compose.verify.yaml', '-p', this.projectName, ...arguments_];
     const settings = {
-      G1_CRASH_EVENT_ID: String(this.crashEventId),
-      G1_SEED_SHIPMENTS: process.env.G1_SEED_SHIPMENTS ?? '4000',
+      CRASH_EVENT_ID: String(this.crashEventId),
+      VERIFY_SEED_SHIPMENTS: String(this.seedShipments),
     };
     try {
       const result = executeDocker(command, settings);
       this.evidence.append('commands.jsonl', {
-        command, stdout: result.stdout, stderr: result.stderr, status: 0,
+        command,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        status: 0,
       });
       if (arguments_.includes('source-writer') && arguments_[0] === 'run') {
         this.evidence.append('source-writer.jsonl', {
-          service: 'source-writer', stdout: result.stdout, stderr: result.stderr,
+          service: 'source-writer',
+          stdout: result.stdout,
+          stderr: result.stderr,
         });
       }
       return result.stdout.trim();
     } catch (error) {
       this.evidence.append('commands.jsonl', {
-        command, stdout: error.stdout, stderr: error.stderr, error: error.message,
+        command,
+        stdout: error.stdout,
+        stderr: error.stderr,
+        error: error.message,
       });
       throw error;
     }
@@ -75,12 +85,15 @@ export class VerificationEnvironment {
     );
   }
 
-  async recreateReplicator() {
+  async recreateReplicator(crashEventId = '') {
     // Stop the reader before removing a container so its last snapshot is retained.
     await this.evidence.stopCollector();
     this.evidence.snapshot();
-    this.evidence.timeline('recreate replicator', { service: 'replicator', status: this.replicatorStatus() });
-    this.crashEventId = '';
+    this.evidence.timeline('recreate replicator', {
+      service: 'replicator',
+      status: this.replicatorStatus(),
+    });
+    this.crashEventId = crashEventId;
     // Replacing the container proves recovery uses the retained named volume.
     this.compose('up', '-d', '--force-recreate', 'replicator');
     this.evidence.startCollector(this.projectName);
@@ -155,15 +168,33 @@ export class VerificationEnvironment {
     this.assertCompleteResponse(response, '/shipments/_mget');
     // GET by ID avoids depending on OpenSearch's asynchronous search refresh.
     const documents = response.docs;
-    this.evidence.save(`validation/opensearch-batch-${++this.documentBatch}.json`, { shipmentIds, documents });
+    this.evidence.save(`validation/opensearch-batch-${++this.documentBatch}.json`, {
+      shipmentIds,
+      documents,
+    });
     return documents;
+  }
+
+  readShipmentCount() {
+    const refresh = this.requestOpenSearch('POST', '/shipments/_refresh');
+    this.assertCompleteResponse(refresh, '/shipments/_refresh');
+    const response = this.requestOpenSearch('GET', '/shipments/_count');
+    this.assertCompleteResponse(response, '/shipments/_count');
+    return response.count;
   }
 
   requestOpenSearch(method, path, body) {
     const arguments_ = [
-      'exec', '-T', 'opensearch', 'curl',
-      '--fail', '--silent', '--show-error',
-      '-X', method, 'http://localhost:9200' + path,
+      'exec',
+      '-T',
+      'opensearch',
+      'curl',
+      '--fail',
+      '--silent',
+      '--show-error',
+      '-X',
+      method,
+      'http://localhost:9200' + path,
     ];
     if (body !== undefined) {
       arguments_.push('-H', 'Content-Type: application/json', '-d', body);
@@ -184,24 +215,20 @@ export class VerificationEnvironment {
     let pageNumber = 0;
     let received = 0;
     try {
-      let response = this.requestOpenSearch('POST', '/shipment-records/_search?scroll=1m',
-        JSON.stringify({ size: 500, sort: ['_doc'], track_total_hits: true }));
+      let response = this.requestOpenSearch(
+        'POST',
+        '/shipment-records/_search?scroll=1m',
+        JSON.stringify({ size: 500, sort: ['_doc'], track_total_hits: true }),
+      );
       let expected;
 
       while (true) {
         scrollId = response._scroll_id ?? scrollId;
-        this.evidence.save(
-          `validation/opensearch-records-batch-${++pageNumber}.json`,
-          response,
-        );
+        this.evidence.save(`validation/opensearch-records-batch-${++pageNumber}.json`, response);
         this.assertCompleteResponse(response, 'history scroll page ' + pageNumber);
         if (!response._scroll_id) throw new Error('Missing OpenSearch history scroll ID');
         const total = response.hits?.total;
-        if (
-          total?.relation !== 'eq' ||
-          !Number.isSafeInteger(total.value) ||
-          total.value < 0
-        ) {
+        if (total?.relation !== 'eq' || !Number.isSafeInteger(total.value) || total.value < 0) {
           throw new Error('OpenSearch did not return an exact history document count');
         }
         expected ??= total.value;
@@ -215,16 +242,22 @@ export class VerificationEnvironment {
         if (documents.length === 0) break;
         received += documents.length;
         yield documents;
-        response = this.requestOpenSearch('POST', '/_search/scroll',
-          JSON.stringify({ scroll: '1m', scroll_id: scrollId }));
+        response = this.requestOpenSearch(
+          'POST',
+          '/_search/scroll',
+          JSON.stringify({ scroll: '1m', scroll_id: scrollId }),
+        );
       }
       if (received !== expected) {
         throw new Error(`Incomplete OpenSearch history scan: ${received} of ${expected} documents`);
       }
     } finally {
       if (scrollId) {
-        this.requestOpenSearch('DELETE', '/_search/scroll',
-          JSON.stringify({ scroll_id: [scrollId] }));
+        this.requestOpenSearch(
+          'DELETE',
+          '/_search/scroll',
+          JSON.stringify({ scroll_id: [scrollId] }),
+        );
       }
     }
   }
@@ -239,10 +272,9 @@ export class VerificationEnvironment {
 }
 
 // Waiting observes asynchronous services; it never retries failed commands or assertions.
-export async function waitFor(description, observe) {
-  const timeoutMs = Number(process.env.G1_WAIT_TIMEOUT_MS ?? 600000);
+export async function waitFor(description, observe, timeoutMs = DEFAULT_WAIT_TIMEOUT_MS) {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
-    throw new Error('G1_WAIT_TIMEOUT_MS must be a positive integer');
+    throw new Error('Verification wait timeout must be a positive integer');
   }
   const deadline = Date.now() + timeoutMs;
   let nextProgressReport = Date.now() + 30000;
@@ -256,4 +288,8 @@ export async function waitFor(description, observe) {
     await setTimeout(500);
   }
   throw new Error(`Timed out waiting for ${description}`);
+}
+
+export function createWait(configuration) {
+  return (description, observe) => waitFor(description, observe, configuration.waitTimeoutMs);
 }

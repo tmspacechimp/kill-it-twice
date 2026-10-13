@@ -2,7 +2,7 @@
 
 ## Purpose and scope
 
-This repository demonstrates a shipment event pipeline with an initial load, finite incremental polling, current-state and event-history search indexes, and an independent event consumer. G1 verifies recovery from a replicator process crash under the assumptions below. G2–G5 and the operator UI remain outside the implemented scope. [G1.md](G1.md) explains the recovery proof; [submission notes](docs/submission-notes.md) record tradeoffs and omissions. Earlier versions of this specification remain in Git history.
+This repository demonstrates a shipment event pipeline with an initial load, finite incremental polling, current-state and event-history search indexes, and an independent event consumer. G1 verifies recovery from a replicator process crash under the assumptions below. A [G2 verification case](docs/g2-verification.md) checks multiple scheduled replicator crashes with retained volumes and surviving destinations; consumer-crash recovery and the complete G2 epic remain outside this case. G3–G5 and the operator UI remain outside the implemented scope. [G1.md](G1.md) and [G2.md](G2.md) explain the recovery proofs; [submission notes](docs/submission-notes.md) record tradeoffs and omissions. Earlier versions of this specification remain in Git history.
 
 ## Components and source contract
 
@@ -34,6 +34,8 @@ The consumer stores processed event identities in its own SQLite database and pe
 
 The receipt commits before console output. A consumer crash in that gap can omit the normal log, and redelivery may produce only a duplicate log. Receipts are not a transactional business effect or exactly-once logging guarantee. They must be retained with the same source history; the replicator does not access them.
 
+`make verify` runs G1 and G2 sequentially in separate isolated projects; `make verify-g1` and `make verify-g2` run them individually. Both have independent settings with shared seed and timeout defaults. G2 schedules initial and incremental crashes, including repeated IDs, after confirmed publication and before checkpointing; it validates each crash before advancing. Only the replicator is recreated, retaining its checkpoint volume and surviving destinations and consumer. Traffic is supplied for the first incremental target and while stopped before the final restart, preserving the polling rules. The [G2 case guide](docs/g2-verification.md) defines configuration, comparisons, and evidence. This finite case does not establish exactly-once delivery or complete G2.
+
 ## Guarantee and limits
 
 Under a single serial, append-only source writer, one replicator per checkpoint volume, one consumer per receipt volume, and intact source, destination services, and volumes, the pipeline provides **at-least-once processing across replicator process interruption**. G1 injects a crash after confirmed publication and before checkpointing, then checks replay, resumed cursors, complete event logs, current shipment documents, and full OpenSearch event-history coverage including the replay. [G1.md](G1.md) states exactly what the test proves.
@@ -57,8 +59,8 @@ including source history, both indexes, checkpoints, and receipts. `make run-fre
 resets first, then runs the demo. Both retain saved host logs and configuration.
 
 Demo runs use DEMO_SEED_SHIPMENTS and DEMO_INCREMENTAL_EVENTS from `.env`;
-G1 uses G1_SEED_SHIPMENTS from `.env.verify`. The replicator's polling and recovery
-rules remain unchanged. Demo logs are size-limited; G1 evidence is retained
-until deleted. Collection or cleanup failures prevent G1 PASS.
+G1 and G2 use their own settings from `.env.verify`. The replicator's polling and
+recovery rules remain unchanged. Demo logs are size-limited; verification evidence
+is retained until deleted. Collection or cleanup failures prevent scenario PASS.
 [Run-log details](docs/run-logs.md) explain configuration, saved evidence, and
 incomplete runs.

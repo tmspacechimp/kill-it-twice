@@ -20,17 +20,17 @@ There is no comparable measured end-to-end throughput for the current pipeline. 
 
 ## What I did not build and why
 
-The implementation concentrates on a reproducible G1 process-crash proof. G2 would require a separate executable duplicate-outcome check across repeated kills and restarts; G1 proves one specific replay and consumer detection. G3 destination-outage recovery would require a retry and reconnection policy. G4 partial rejection needs independent record outcomes and a durable DLQ with replay. G5 operational visibility needs metrics and an operator UI. These systems are absent, so Dashboards inspection and healthy containers must not be mistaken for those gates. The current finite polling session also does not meet the assignment's continuous synchronization target. Broker messages are non-persistent, and the pipeline does not rebuild lost destination state.
+The implementation includes a reproducible G1 process-crash proof and a [scheduled replicator-crash case toward G2](g2-verification.md). The latter checks repeated replay, consumer handling, and final destination state with retained volumes and a surviving consumer; it does not establish consumer-crash recovery or complete the G2 epic. G3 destination-outage recovery would require a retry and reconnection policy. G4 partial rejection needs independent record outcomes and a durable DLQ with replay. G5 operational visibility needs metrics and an operator UI. These systems are absent, so Dashboards inspection and healthy containers must not be mistaken for those gates. The current finite polling session also does not meet the assignment's continuous synchronization target. Broker messages are non-persistent, and the pipeline does not rebuild lost destination state.
 
 | Gate | Status | Evidence or missing work |
 | --- | --- | --- |
 | G1: replicator interruption and resume | PASS in a recorded isolated run | Forced crash after confirmed publication, retained cursors, observed duplicate, full source/log and index comparisons; see [G1.md](../G1.md). |
-| G2: no harmful duplicate outcomes | Unsupported as a separate gate | G1 observes one replay, one duplicate receipt, and correct final state; repeated kills and destination effects are not separately verified. |
+| G2: no harmful duplicate outcomes | Scheduled replicator-crash case implemented; epic incomplete | `make verify-g2` checks repeated initial and incremental replay, unique normal consumer handling, and exact latest shipment state/count; consumer-crash recovery remains outside this case. |
 | G3: destination outage and recovery | Unsupported | No automatic retry or reconnect, and broker durability is outside the G1 guarantee. |
 | G4: partial batch failure | Unsupported | No per-record rejection handling or DLQ. |
 | G5: observability | Unsupported | Logs and Dashboards inspection do not supply the required progress, lag, throughput, DLQ, and health view. |
 
-`make verify` runs G1 only. The G1 status above is a [recorded result](validation-history.md#rabbitmq-startup-fix-and-live-g1-duplicate-proof--2026-09-30), not a claim that every future environment will pass.
+`make verify` runs G1 then G2; `make verify-g1` and `make verify-g2` run one scenario. The G1 status above is a [recorded result](validation-history.md#rabbitmq-startup-fix-and-live-g1-duplicate-proof--2026-09-30), not a claim that every future environment will pass.
 
 ## Where AI-assisted work diverged from the intended behavior
 

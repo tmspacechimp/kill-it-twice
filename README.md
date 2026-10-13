@@ -48,7 +48,8 @@ count is **event rows**, and rate is events per second.
 
 Inspect with `make counts`, `make history ID=1`, `make shipment ID=1`, or
 [Dashboards Discover](http://localhost:5601/app/discover). `make down` removes
-containers and keeps data.
+containers and keeps data. The [Make command guide](docs/make-commands.md)
+explains every command, its options, and when to use it.
 
 ## Check crash recovery
 
@@ -56,24 +57,21 @@ containers and keeps data.
 make verify
 ```
 
-G1 uses an isolated project and records the crash, checkpoint recovery, duplicate
-delivery, and destination comparisons. Configure it separately in `.env.verify`:
+This runs G1 and G2 sequentially in separate isolated projects. Use
+`make verify-g1` or `make verify-g2` to run one scenario. Configure seed sizes,
+incremental batches, timeouts, and crash targets in [.env.verify](.env.verify);
+the [verification guide](scripts/verification/README.md) links the settings and
+evidence details. PASS requires all checks and cleanup to succeed.
 
-```dotenv
-G1_SEED_SHIPMENTS=4000
-G1_CRASH_EVENT_ID=2048
-G1_WAIT_TIMEOUT_MS=600000
-```
-
-G1 prints PASS only after its checks and cleanup succeed. G2-G5 and the operator
-UI are outside the implemented scope. Its saved summary records recovery results;
-see [how the G1 report works](docs/g1-report.md) for checks, counts, and timing.
-[G1.md](G1.md) explains the guarantee.
+[G1.md](G1.md) explains single-crash recovery; [G2.md](G2.md) explains repeated
+initial and incremental crashes. G2 covers a scheduled replicator-crash case;
+consumer-crash recovery, G3-G5, and the operator UI remain outside scope.
 
 ## Logs and manual runs
 
-Demo logs live in `logs/demo/<run-id>/`, G1 evidence in
-`logs/verify-g1/<run-id>/`. Start with `summary.json`; delete old run directories
+Demo logs live in `logs/demo/<run-id>/`, verification evidence in
+`logs/verify-g1/<run-id>/` and `logs/verify-g2/<run-id>/`.
+Start with `summary.json`; delete old run directories
 when finished with them. Logs are ignored by Git. [Log guide](docs/run-logs.md)
 covers the evidence files and retention.
 
