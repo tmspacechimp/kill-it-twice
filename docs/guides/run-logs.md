@@ -49,7 +49,7 @@ G1_CRASH_EVENT_ID, G1_INCREMENTAL_EVENTS, and G1_WAIT_TIMEOUT_MS in `.env.verify
 override the file. The crash event must be above 1 and below the initial event
 count. G1 generates two batches of G1_INCREMENTAL_EVENTS rows. Seed and timeout
 references inherit DEFAULT_SEED_SHIPMENTS and DEFAULT_WAIT_TIMEOUT_MS; literal
-scenario values override them. [G1.md](../G1.md) explains the guarantee; the [G1 report guide](g1-report.md)
+scenario values override them. [G1.md](../../G1.md) explains the guarantee; the [G1 report guide](../verification/g1-report.md)
 explains the checks, result fields, and timing observations.
 
 Files under `logs/verify-g1/<run-id>/`:
@@ -76,7 +76,7 @@ the existing checks, log collection, and cleanup succeed. No other gate is teste
 
 G2's scheduled-crash case uses the same evidence conventions under
 `logs/verify-g2/<run-id>/`, plus a saved crash schedule and observations for each
-crash and restart. The [G2 guide](g2-verification.md#retained-evidence) describes
+crash and restart. The [G2 guide](../verification/g2-verification.md#retained-evidence) describes
 these files and the narrower scope of its PASS result.
 
 ## Incomplete collection

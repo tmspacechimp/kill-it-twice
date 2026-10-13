@@ -43,9 +43,9 @@ Cleanup removes only that project's containers and volumes, including on failure
 Configure [.env.verify](../../.env.verify). `DEFAULT_SEED_SHIPMENTS` and
 `DEFAULT_WAIT_TIMEOUT_MS` supply shared defaults; each scenario can override its
 seed, wait timeout, incremental batch size, and crash targets independently.
-Exported variables take precedence. The [G1 report guide](../../docs/g1-report.md)
-and [G2 case guide](../../docs/g2-verification.md) explain settings and saved
-evidence. The [Make command guide](../../docs/make-commands.md) covers the other
+Exported variables take precedence. The [G1 report guide](../../docs/verification/g1-report.md)
+and [G2 case guide](../../docs/verification/g2-verification.md) explain settings and saved
+evidence. The [Make command guide](../../docs/guides/make-commands.md) covers the other
 commands.
 
 For fast checks without Docker:

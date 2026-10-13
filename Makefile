@@ -31,7 +31,7 @@ verify-g2:
 
 help:
 	@echo "Demo: make init, then make run"
-	@echo "Command explanations and examples: docs/make-commands.md"
+	@echo "Command explanations and examples: docs/guides/make-commands.md"
 	@echo "init        Create .env if missing; then set both passwords"
 	@echo "build       Build all apps (or SERVICES='replicator consumer')"
 	@echo "postgres    Start PostgreSQL and wait until healthy"

@@ -1,5 +1,18 @@
 # Validation history
 
+## Documentation organization — 2026-10-13
+
+Grouped the eleven documents into `docs/guides/`, `docs/verification/`, and
+`docs/project/`, with `docs/README.md` as the index. The root README, SPEC, G1/G2
+proofs, script guides, agent instructions, and Make help now use the moved paths.
+Original assignment text and recorded results were retained; historical file
+paths in older run descriptions remain as recorded.
+
+Validation: inspected all 107 local Markdown links across 20 documents; none
+were broken. `wsl --exec make help` printed the new command-guide location,
+and `git diff --check` passed. Application tests were not rerun for these
+documentation moves and link changes.
+
 ## Organized verification and command documentation — 2026-10-13
 
 G1 and G2 now live under `scripts/verification/g1/` and `g2/`, each with its
@@ -9,8 +22,8 @@ and their tests moved to `shared/`; the combined runner and Make targets point
 to the new paths. Scenario behavior and replicator operating rules are unchanged.
 
 README now links configuration details instead of repeating the verification
-environment block. The [Make command guide](make-commands.md) explains all
-targets and options; `make help` points to it. Root-level [G2.md](../G2.md)
+environment block. The [Make command guide](../guides/make-commands.md) explains all
+targets and options; `make help` points to it. Root-level [G2.md](../../G2.md)
 explains the repeated-crash proof and accurately cites the earlier scaled run.
 G1's written step order was corrected to put restart traffic before recreation.
 SPEC and the script guides link the new documentation.

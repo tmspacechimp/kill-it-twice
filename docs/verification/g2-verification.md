@@ -3,7 +3,7 @@
 Run `make verify-g2` with Node.js 24 and Docker Compose, or `make verify` for G1
 followed by G2. On Windows/WSL add `NODE=node.exe`. Each scenario uses its own
 isolated Compose project; G2 does not complete every aspect of the G2 epic.
-The root-level [G2 proof](../G2.md) explains recovery and recorded results;
+The root-level [G2 proof](../../G2.md) explains recovery and recorded results;
 this guide covers configuration and evidence files.
 
 ## Configuration
@@ -76,7 +76,7 @@ the initial load before exiting. These replicator rules are unchanged.
 ## Retained evidence and failure
 
 The printed run directory is under `logs/verify-g2/<run-id>/`. Files follow the
-[G1 evidence conventions](run-logs.md#g1-evidence), without automatic rotation.
+[G1 evidence conventions](../guides/run-logs.md#g1-evidence), without automatic rotation.
 Host evidence survives isolated-project cleanup.
 
 `crash-schedule.json` retains the sequence. `checkpoints.jsonl` contains durable

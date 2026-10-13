@@ -23,7 +23,7 @@ successful checks, log collection, and cleanup produce `G1 PASS`.
    logs and remove the isolated project.
 
 The consumer, PostgreSQL, OpenSearch, and RabbitMQ stay alive across the injected
-replicator crash. [G1.md](../G1.md) explains the recovery design and its assumptions.
+replicator crash. [G1.md](../../G1.md) explains the recovery design and its assumptions.
 
 ## What is checked
 
@@ -136,7 +136,7 @@ or cleanup fails; the top-level status is the final outcome.
 | `commands.jsonl`, `source-writer.jsonl` | Docker command results and output from removed one-off source writers. |
 
 Snapshots are retained without rotation and the comparison harness holds fixtures
-in memory. The [log guide](run-logs.md) covers file retention. These checks cover
+in memory. The [log guide](../guides/run-logs.md) covers file retention. These checks cover
 replicator process interruption with intact services and volumes; they do not
 establish broker/disk-loss recovery, consumer-crash recovery, G2-G5, or
 exactly-once console logging.

@@ -32,8 +32,8 @@ the services remain available for inspection. Configure demo size and rate in
 Verification uses `.env.verify`, saves evidence under `logs/verify-g1/` or
 `logs/verify-g2/`, and removes its isolated services and volumes after each run.
 It does not reset the regular demo project. See the
-[verification guide](../scripts/verification/README.md) for configuration and
-[G1](../G1.md) / [G2](../G2.md) for the proofs.
+[verification guide](../../scripts/verification/README.md) for configuration and
+[G1](../../G1.md) / [G2](../../G2.md) for the proofs.
 
 ## Start and control services
 
@@ -86,7 +86,7 @@ make logs
 Each replicator process waits for its first incremental activity before counting
 empty polls, then stops polling after its configured idle window. It finishes
 the initial load before exiting. Generate later traffic before that window ends,
-or restart the replicator to pick it up. [SPEC.md](../SPEC.md) defines the rules.
+or restart the replicator to pick it up. [SPEC.md](../../SPEC.md) defines the rules.
 
 ## Inspect results
 

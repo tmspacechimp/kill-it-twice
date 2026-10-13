@@ -21,7 +21,7 @@ replicator and consumer, and generates incremental events after the replicator
 has captured its startup boundary. It prints the log directory and collects
 until Ctrl+C. Use `make logs` in another terminal to watch replication progress.
 After replication finishes, a report is generated with checks, counts, and timings;
-see [how the demo report works](docs/demo-report.md).
+see [how the demo report works](docs/guides/demo-report.md).
 Existing data and checkpoints are kept; the seed setting applies to an empty source.
 
 To start from scratch in one command:
@@ -48,7 +48,7 @@ count is **event rows**, and rate is events per second.
 
 Inspect with `make counts`, `make history ID=1`, `make shipment ID=1`, or
 [Dashboards Discover](http://localhost:5601/app/discover). `make down` removes
-containers and keeps data. The [Make command guide](docs/make-commands.md)
+containers and keeps data. The [Make command guide](docs/guides/make-commands.md)
 explains every command, its options, and when to use it.
 
 ## Check crash recovery
@@ -72,7 +72,7 @@ consumer-crash recovery, G3-G5, and the operator UI remain outside scope.
 Demo logs live in `logs/demo/<run-id>/`, verification evidence in
 `logs/verify-g1/<run-id>/` and `logs/verify-g2/<run-id>/`.
 Start with `summary.json`; delete old run directories
-when finished with them. Logs are ignored by Git. [Log guide](docs/run-logs.md)
+when finished with them. Logs are ignored by Git. [Log guide](docs/guides/run-logs.md)
 covers the evidence files and retention.
 
 For a manual run:
@@ -87,6 +87,7 @@ make logs
 ```
 
 These commands give you control over each step and retain existing data.
-See [development.md](docs/development.md) for inspection, custom configuration,
+See [development.md](docs/guides/development.md) for inspection, custom configuration,
 and troubleshooting, [scripts](scripts/README.md) for the command code,
-or [submission notes](docs/submission-notes.md) for tradeoffs.
+or [submission notes](docs/project/submission-notes.md) for tradeoffs.
+The [documentation index](docs/README.md) lists all guides and project references.
